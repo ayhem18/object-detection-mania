@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from typing import Tuple, Dict, List, Any, Union, Callable
 from PIL import Image
 from torchvision.transforms import v2
+from torchvision import tv_tensors
 
 from object_detection_mania.data.synthetic_toy_ds.visualize_scenes import render_scene
 
@@ -126,23 +127,53 @@ class YoloV2Dataset(Dataset):
         # Load as PIL Image
         img = Image.open(img_path).convert("RGB")
         
-        # Apply transforms
-        img = self.transforms(img)
-        
         # Load labels
         targets = []
         if os.path.exists(label_path):
             with open(label_path, 'r') as f:
                 for line in f:
+                    # YOLO: cls, cx, cy, w, h
                     parts = [float(x) for x in line.split()]
                     targets.append(parts)
         
         if not targets:
-            targets = torch.zeros((0, 5))
-        else:
-            targets = torch.tensor(targets)
+            # Handle empty images
+            img = self.transforms(img)
+            return img, torch.zeros((0, 5))
+        
+        targets = torch.tensor(targets)
+        cls_ids = targets[:, 0]
+        bboxes = targets[:, 1:] # cx, cy, w, h (normalized)
+        
+        # Wrap in v2 Datapoints
+        # We use format CXCYWH and canvas_size for normalized coordinates to be handled correctly
+        # Note: v2.BoundingBoxes expects unnormalized coordinates if canvas_size is not used for some transforms,
+        # but for many v2 transforms, passing canvas_size and normalized bboxes works.
+        # However, to be safe with all v2 transforms, we convert to absolute, transform, then back to normalized.
+        h_orig, w_orig = self.img_shape
+        bboxes_abs = bboxes.clone()
+        bboxes_abs[:, [0, 2]] *= w_orig
+        bboxes_abs[:, [1, 3]] *= h_orig
+        
+        boxes_datapoint = tv_tensors.BoundingBoxes(
+            bboxes_abs, 
+            format="CXCYWH", 
+            canvas_size=self.img_shape
+        )
+        
+        # Apply transforms to both
+        img, boxes_transformed = self.transforms(img, boxes_datapoint)
+        
+        # Convert boxes back to normalized
+        _, h_new, w_new = img.shape # img is now a tensor
+        bboxes_out = boxes_transformed.clone()
+        bboxes_out[:, [0, 2]] /= w_new
+        bboxes_out[:, [1, 3]] /= h_new
+        
+        # Reconstruct targets [cls, cx, cy, w, h]
+        final_targets = torch.cat([cls_ids.unsqueeze(1), bboxes_out], dim=1)
             
-        return img, targets
+        return img, final_targets
 
 def yolov2_collate_fn(batch):
     """
