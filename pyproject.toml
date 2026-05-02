@@ -1,0 +1,36 @@
+[project]
+name = "object-detection-mania"
+version = "0.1.0"
+description = "A project to experiment with different object detection models with as much code from scratch as possible"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "mypt",
+    "opencv-python>=4.13.0.92",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "torch==2.5.1",
+    "torchaudio==2.5.1",
+    "torchvision==0.20.1",
+    "tqdm>=4.67.3",
+]
+
+# to ensure that pytorch is install with cuda 11.8
+[[tool.uv.index]]
+name = "pytorch-cu11.8"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+
+[tool.uv.workspace]
+members = [
+    "packages/pytorch_modular",
+]
+
+[tool.uv.sources]
+mypt = { workspace = true, editable = true }
+# the 3 lines below in combination with the index above ensure that uv add torch or uv add torchvision install torch cuda 11.8 version
+torch = { index = "pytorch-cu11.8" }
+torchvision = { index = "pytorch-cu11.8" }
+torchaudio = { index = "pytorch-cu11.8" }
