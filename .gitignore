@@ -2,3 +2,8 @@
 
 packages/*
 
+*__pycache__*
+*.pyc
+
+
+src/object_detection_mania/artifacts/yolo_v2_artifacts/synthetic/configs

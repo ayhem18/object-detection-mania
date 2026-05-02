@@ -81,10 +81,10 @@ def _generate_multi_objects(rng: np.random.Generator, N: int, num_classes: int, 
             if (nf[2] - nf[0]) > 0.05 and (nf[3] - nf[1]) > 0.05:
                 available_boxes.append(nf)
         
-        # 5. Store in YOLO format (cls, color_id, cx, cy, h, w)
+        # 5. Store in YOLO format (cls, color_id, cx, cy, w, h)
         cx = (bx_min + bx_max) / 2.0
         cy = (by_min + by_max) / 2.0
-        objects[i] = (cls_id, color_id, float(cx), float(cy), float(sh), float(sw))
+        objects[i] = (cls_id, color_id, float(cx), float(cy), float(sw), float(sh))
         
     return objects
 
@@ -100,7 +100,7 @@ def _generate_single_random_object(rng: np.random.Generator, num_classes: int, n
         
     x = rng.uniform(w/2, 1.0 - w/2)
     y = rng.uniform(h/2, 1.0 - h/2)
-    return cls_id, color_id, x, y, h, w
+    return cls_id, color_id, x, y, w, h
 
 def generate_scene_parameters(seed: int, num_classes: int = 4, num_colors: int = 5, force_n: Optional[int] = None) -> Dict[str, Any]:
     rng = np.random.default_rng(seed)

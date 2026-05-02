@@ -1,0 +1,27 @@
+model:
+  backbone_arch: 18
+  num_extracted_layers: 4
+  backbone_out_channels: 512
+  num_anchors: 5
+  num_classes: 4
+  num_conv_blocks: 2
+  anchors:
+    - [0.1, 0.1]
+    - [0.3, 0.3]
+    - [0.5, 0.5]
+    - [0.7, 0.7]
+    - [0.9, 0.9]
+
+training:
+  batch_size: 32
+  epochs: 50
+  lr: 0.0001
+  img_size: 416
+  early_stop_patience: 10
+  background_obj_coeff: 0.1
+  reg_loss_type: "mse"
+
+dataset:
+  train_config: "train_10000_42_config.json"
+  val_config: "val_2000_42_config.json"
+  test_config: "test_1000_42_config.json"

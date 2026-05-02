@@ -51,9 +51,9 @@ def render_scene(params: Dict[str, Any], seed: int, img_shape: Tuple[int, int] =
     
     colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
     
-    for idx, (cls_id, color_id, x, y, obj_h, obj_w) in params['objects'].items():
+    for idx, (cls_id, color_id, x, y, obj_w, obj_h) in params['objects'].items():
         color = colors[color_id % len(colors)]
-        
+
         if cls_id == 0:
             draw_rectangle(img, x, y, obj_w, obj_h, color)
         elif cls_id == 1:
@@ -64,32 +64,33 @@ def render_scene(params: Dict[str, Any], seed: int, img_shape: Tuple[int, int] =
             draw_triangle(img, x, y, obj_w, obj_h, color, base_at_bottom=base_at_bottom)
         elif cls_id == 3:
             draw_diamond(img, x, y, obj_w, obj_h, color)
-            
+
     return img
 
 def visualize_cases(num_samples_per_case: int = 10, img_shape: Tuple[int, int] = (512, 512)):
     save_dir = get_artifacts_dir()
     seed_everything(42)
-    
+
     for N in range(6):
         print(f"Generating grid for N={N} objects...")
         fig, axes = plt.subplots(2, 5, figsize=(20, 8))
         axes = axes.flatten()
-        
+
         for i in range(num_samples_per_case):
             seed = 1000 * N + i
             params = generate_scene_parameters(seed=seed, force_n=N)
             img = render_scene(params, seed, img_shape)
-            
+
             axes[i].imshow(img)
-            
+
             # Overlay Bounding Boxes for verification
-            for idx, (cls_id, color_id, x, y, obj_h, obj_w) in params['objects'].items():
+            for idx, (cls_id, color_id, x, y, obj_w, obj_h) in params['objects'].items():
                 xmin = (x - obj_w/2) * img_shape[1]
                 ymin = (y - obj_h/2) * img_shape[0]
                 rect = patches.Rectangle((xmin, ymin), obj_w * img_shape[1], obj_h * img_shape[0], 
                                          linewidth=1, edgecolor='white', facecolor='none', alpha=0.8)
                 axes[i].add_patch(rect)
+
                 
             axes[i].set_title(f"Sample {i+1} (N={params['num_objects']})")
             axes[i].axis('off')
