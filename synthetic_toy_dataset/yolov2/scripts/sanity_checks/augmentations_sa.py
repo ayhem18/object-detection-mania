@@ -1,10 +1,8 @@
-import os
-import torch
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from pathlib import Path
 from torchvision.transforms import v2
-from object_detection_mania.yolo_v2.modules.yolov2_ds import YoloV2Dataset
+from home_made_od.yolo_v2.modules.yolov2_ds import YoloV2Dataset
 
 def draw_boxes(ax, targets, img_size):
     """
@@ -65,7 +63,7 @@ def run_single_aug_check(aug_name, transform, config_path, artifacts_dir, img_si
 def main():
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent.parent.parent.parent.parent
-    artifacts_dir = project_root / "src" / "object_detection_mania" / "artifacts" / "yolo_v2_artifacts" / "synthetic"
+    artifacts_dir = project_root / "src" / "home_made_od" / "artifacts" / "yolo_v2_artifacts" / "synthetic"
     
     config_path = artifacts_dir / "configs" / "val_2000_42_config.json"
     if not config_path.exists():

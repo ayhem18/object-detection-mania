@@ -1,0 +1,25 @@
+[project]
+name = "home-made-od"
+version = "0.1.0"
+description = "My custom object detection implementations, tricks, and ideas"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "mypt", # Depends on my pytorch_modular workspace package
+    "opencv-python>=4.13.0.92",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "torch==2.5.1",
+    "torchaudio==2.5.1",
+    "torchvision==0.20.1",
+    "tqdm>=4.67.3",
+]
+
+# Workspace configuration and indices have been moved to the root pyproject.toml
+# to avoid conflicts and maintain a single lockfile for the repo.
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

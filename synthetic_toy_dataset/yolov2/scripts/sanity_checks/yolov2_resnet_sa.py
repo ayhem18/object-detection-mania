@@ -9,11 +9,11 @@ from torchvision.transforms import v2
 from torch.utils.data import DataLoader, Subset
 
 from mypt.backbones.resnetFE import ResnetFE
-from object_detection_mania.yolo_v2.modules.yolov2_ds import YoloV2Dataset, yolov2_collate_fn
-from object_detection_mania.yolo_v2.modules.yolov2_model import YoloV2
-from object_detection_mania.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
-from object_detection_mania.yolo_v2.modules.yolov2_loss import YoloV2Loss
-from object_detection_mania.general.path_utils import get_yolo_v2_artifacts_dir, get_yolo_v2_config_dir
+from home_made_od.yolo_v2.modules.yolov2_ds import YoloV2Dataset, yolov2_collate_fn
+from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
+from home_made_od.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
+from home_made_od.yolo_v2.modules.yolov2_loss import YoloV2Loss
+from home_made_od.general.path_utils import get_yolo_v2_artifacts_dir, get_yolo_v2_config_dir
 
 from mypt.code_utils.pytorch_utils import seed_everything
 
@@ -55,7 +55,7 @@ def get_overfit_dataloaders(config_path: Path, artifacts_dir: Path, selected_ind
     )
     
     subset_ds = Subset(full_ds, selected_indices)
-    loader = DataLoader(subset_ds, batch_size=len(selected_indices), collate_fn=yolov2_collate_fn, shuffle=False)
+    loader = DataLoader(subset_ds, batch_size=min(6, len(selected_indices)), collate_fn=yolov2_collate_fn, shuffle=False)
     return loader
 
 def build_sa_model(num_classes: int, num_anchors: int):
@@ -89,7 +89,7 @@ def run_overfit_loop(model, loader, target_calc, criterion, optimizer, device, m
             optimizer.zero_grad()
             
             preds = model(inputs)
-            with torch.no_grad():
+            with torch.no_grad(): 
                 targets = target_calc(labels, inputs.size(0))
                 
             loss_dict = criterion(preds, targets, reduce=True, return_all_losses=True)
@@ -103,8 +103,8 @@ def run_overfit_loop(model, loader, target_calc, criterion, optimizer, device, m
             
         # Thresholds: CEL < 10^-4, MSE < 10^-3, Obj < 10^-4
         if (loss_dict['loss_cls'] < 1e-4 and 
-            loss_dict['loss_reg'] < 1e-3 and 
-            loss_dict['loss_obj'] < 1e-4):
+            loss_dict['loss_reg'] < 1e-4 and 
+            loss_dict['loss_obj'] < 1e-3):
             print(f"\n[SUCCESS] Thresholds met at epoch {epoch}!")
             return True, loss_dict
             

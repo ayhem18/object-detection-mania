@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: home-made-od
+Version: 0.1.0
+Summary: My custom object detection implementations, tricks, and ideas
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: matplotlib>=3.10.8
+Requires-Dist: mypt
+Requires-Dist: opencv-python>=4.13.0.92
+Requires-Dist: python-dotenv>=1.2.2
+Requires-Dist: pyyaml>=6.0.3
+Requires-Dist: torch==2.5.1
+Requires-Dist: torchaudio==2.5.1
+Requires-Dist: torchvision==0.20.1
+Requires-Dist: tqdm>=4.67.3

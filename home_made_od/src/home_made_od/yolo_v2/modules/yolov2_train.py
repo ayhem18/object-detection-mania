@@ -6,9 +6,9 @@ from tqdm import tqdm
 from typing import Dict, List, Optional, Tuple, Any
 
 from mypt.loggers.base import BaseLogger
-from object_detection_mania.general.early_stopping import EarlyStopping
-from object_detection_mania.yolo_v2.modules.yolov2_loss import YoloV2Loss
-from object_detection_mania.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
+from home_made_od.general.early_stopping import EarlyStopping
+from home_made_od.yolo_v2.modules.yolov2_loss import YoloV2Loss
+from home_made_od.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
 
 # =========================================================================================
 # YOLOv2 Training Utilities

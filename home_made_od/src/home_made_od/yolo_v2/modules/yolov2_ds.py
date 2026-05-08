@@ -2,13 +2,13 @@ import os
 import json
 import cv2
 import torch
-import numpy as np
-from pathlib import Path
-from torch.utils.data import Dataset
-from typing import Tuple, Dict, List, Any, Union, Callable
+
 from PIL import Image
-from torchvision.transforms import v2
+from pathlib import Path
 from torchvision import tv_tensors
+from torch.utils.data import Dataset
+from torchvision.transforms import v2
+from typing import Tuple, List, Union, Callable
 
 from object_detection_mania.data.synthetic_toy_ds.visualize_scenes import render_scene
 
