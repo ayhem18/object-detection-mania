@@ -3,7 +3,7 @@ import sys
 import json
 import yaml
 import torch
-import hashlibc
+import hashlib
 
 from pathlib import Path
 from torchvision.transforms import v2

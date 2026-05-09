@@ -232,7 +232,8 @@ def main():
     
     # Configuration
     DATA_DIR = os.path.join(road_sign_root, 'data_512')
-    CHECKPOINT_PATH = os.path.join(road_sign_root, 'artifacts', 'baseline', 'checkpoints', 'best_model.pt')
+    # CHECKPOINT_PATH = os.path.join(road_sign_root, 'artifacts', 'baseline', 'checkpoints', 'best_model.pt')
+    CHECKPOINT_PATH = os.path.join(road_sign_root, 'artifacts', 'baseline', '893b8fced220f0a96492f50a02a8da7e', 'checkpoints', 'best_model.pt')
     TEST_DIR = os.path.join(road_sign_root, 'data', 'test', 'images')
     
     # Submission path: artifacts/baseline/submission/submission.csv
@@ -278,7 +279,7 @@ def main():
         class_mapping, DEVICE, anchors, batch_size=BATCH_SIZE, conf_thresh=0.25
     )
     
-    visualize_predictions(vis_data, VISUALIZATION_DIR, max_images=10)
+    visualize_predictions(vis_data, VISUALIZATION_DIR, max_images=20)
 
 
 if __name__ == "__main__":
