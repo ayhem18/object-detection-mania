@@ -81,7 +81,11 @@ class YoloFormatDataset(Dataset):
         
         # Get dimensions (PIL uses .size, OpenCV/Numpy uses .shape)
         if hasattr(img, 'size'):
-            w_orig, h_orig = img.size
+            # img.size can be either a tuple of an integer or a tuple of two integers
+            if isinstance(img.size, int):
+                w_orig = h_orig = img.size
+            else:
+                w_orig, h_orig = img.size
         else:
             h_orig, w_orig = img.shape[:2]
         

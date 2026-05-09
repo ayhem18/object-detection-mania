@@ -62,7 +62,6 @@ def get_anchors(data_pairs, num_anchors=5):
                 if len(parts) >= 5:
                     w, h = float(parts[3]), float(parts[4])
                     wh_list.append((w, h))
-    
     anchors = generate_anchors(wh_list, num_anchors=num_anchors)
     print(f"Generated Anchors: {anchors.tolist()}")
     return anchors.tolist()
@@ -74,7 +73,7 @@ def build_model(num_classes, num_anchors):
         build_by_layer=True,
         num_extracted_layers=-1, # Extract all 4 layers
         num_extracted_bottlenecks=-1,
-        freeze=3, # Freeze the first 3 layers
+        freeze=2, # Freeze the first 3 layers
         freeze_by_layer=True,
         add_global_average=False,
         architecture=50
@@ -152,8 +151,8 @@ def main():
     train_ds = YoloFormatDataset([all_pairs[i] for i in train_pairs.indices], IMG_SIZE, train_transforms)
     val_ds = YoloFormatDataset([all_pairs[i] for i in val_pairs.indices], IMG_SIZE, val_transforms)
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=yolov2_collate_fn)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=yolov2_collate_fn)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=yolov2_collate_fn, num_workers=2)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=yolov2_collate_fn, num_workers=2)
     
     # 512 / 32 = 16
     feature_map_shape = (IMG_SIZE[0] // 32, IMG_SIZE[1] // 32)
