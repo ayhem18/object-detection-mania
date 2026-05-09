@@ -1,7 +1,9 @@
 import os
 import sys
+import json
+import yaml
 import torch
-import logging
+import hashlibc
 
 from pathlib import Path
 from torchvision.transforms import v2
@@ -22,7 +24,6 @@ road_sign_root = os.path.join(workspace_root, 'road_sign')
 
 # Add the workspace root to sys.path so 'road_sign' can be imported
 sys.path.insert(0, workspace_root)
-# mypt is installed as a package, so we don't need to append its src directory to sys.path
 
 from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
 from home_made_od.yolo_v2.modules.yolov2_loss import YoloV2Loss
@@ -67,19 +68,16 @@ def get_anchors(data_pairs, num_anchors=5):
     return anchors.tolist()
 
 def build_model(num_classes, num_anchors):
-    # Use the custom ResnetFE wrapper to build ResNet50
-    # Freeze 3 out of 4 layers
     resnet_fe = ResnetFE(
         build_by_layer=True,
-        num_extracted_layers=-1, # Extract all 4 layers
+        num_extracted_layers=-1, 
         num_extracted_bottlenecks=-1,
-        freeze=2, # Freeze the first 3 layers
+        freeze=2,
         freeze_by_layer=True,
         add_global_average=False,
         architecture=50
     )
     
-    # The output of ResNet50 layer4 is 2048 channels
     backbone_out_channels = 2048 
     
     model = YoloV2(
@@ -90,82 +88,107 @@ def build_model(num_classes, num_anchors):
         num_conv_blocks=2
     )
     
-    # Return both model and the ImageNet transform expected by the weights
     return model, resnet_fe.transform
 
+def get_config_hash(config_dict):
+    """Generates a stable MD5 hash of the configuration dictionary."""
+    config_str = json.dumps(config_dict, sort_keys=True)
+    return hashlib.md5(config_str.encode()).hexdigest()
+
 from dotenv import load_dotenv
+
+# --- Default Configuration ---
+DEFAULT_CONFIG = {
+    "experiment_name": "baseline_resnet50",
+    "data_dir": "data_512",
+    "img_size": [512, 512],
+    "batch_size": 64, 
+    "epochs": 250,    
+    "lr": 1e-3,       
+    "num_classes": 8,
+    "num_anchors": 5,
+    "early_stop_patience": 20,
+    "seed": 42
+}
 
 def main():
     load_dotenv()
     
-    # Set seed for reproducibility
-    seed_everything(42)
+    # 1. Config Management
+    config = DEFAULT_CONFIG.copy()
+    config_hash = get_config_hash(config)
     
-    # --- Configuration ---
-    DATA_DIR = os.path.join(road_sign_root, 'data_512')
-    ARTIFACT_DIR = os.path.join(road_sign_root, 'artifacts', 'baseline')
-    IMG_SIZE = (512, 512)
-    BATCH_SIZE = 256
-    EPOCHS = 50
-    NUM_CLASSES = 8
-    NUM_ANCHORS = 5
+    artifact_root = os.path.join(road_sign_root, 'artifacts', 'baseline', config_hash)
+    os.makedirs(artifact_root, exist_ok=True)
+    
+    # Save active config for reproducibility
+    with open(os.path.join(artifact_root, "config.yaml"), "w") as f:
+        yaml.dump(config, f)
+        
+    print(f"--- Experiment Hash: {config_hash} ---")
+    print(f"Artifacts will be saved to: {artifact_root}")
+
+    seed_everything(config["seed"])
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 1. Prepare Data Pairs
-    all_pairs = get_data_pairs(DATA_DIR)
+    # 2. Data Preparation
+    DATA_PATH = os.path.join(road_sign_root, config["data_dir"])
+    all_pairs = get_data_pairs(DATA_PATH)
     print(f"Found {len(all_pairs)} image-label pairs.")
 
-    # 2. Split Data
     train_size = int(0.8 * len(all_pairs))
     val_size = len(all_pairs) - train_size
     train_pairs, val_pairs = random_split(all_pairs, [train_size, val_size])
 
-    # 3. Anchors
-    anchors = get_anchors([all_pairs[i] for i in train_pairs.indices], num_anchors=NUM_ANCHORS)
+    # 3. Dynamic Anchors
+    anchors = get_anchors([all_pairs[i] for i in train_pairs.indices], num_anchors=config["num_anchors"])
 
-    # 4. Build Model, Loss, and Target Calculator
-    model, imagenet_transform = build_model(NUM_CLASSES, NUM_ANCHORS)
+    # 4. Build Model & Transforms
+    model, imagenet_transform = build_model(config["num_classes"], config["num_anchors"])
     model = model.to(DEVICE)
     
-    # Extract normalization mean/std from the backbone's expected transform
-    mean = imagenet_transform.mean
-    std = imagenet_transform.std
+    mean, std = imagenet_transform.mean, imagenet_transform.std
 
-    # 5. Datasets & Dataloaders
     train_transforms = v2.Compose([
         v2.RandomHorizontalFlip(p=0.5),
         v2.ColorJitter(brightness=0.2, contrast=0.2),
-        v2.Resize(IMG_SIZE),
+        v2.Resize(config["img_size"]),
         v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean=mean, std=std) # Added ImageNet Normalization
+        v2.Normalize(mean=mean, std=std)
     ])
     
     val_transforms = v2.Compose([
-        v2.Resize(IMG_SIZE),
+        v2.Resize(config["img_size"]),
         v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean=mean, std=std) # Added ImageNet Normalization
+        v2.Normalize(mean=mean, std=std)
     ])
 
-    train_ds = YoloFormatDataset([all_pairs[i] for i in train_pairs.indices], IMG_SIZE, train_transforms)
-    val_ds = YoloFormatDataset([all_pairs[i] for i in val_pairs.indices], IMG_SIZE, val_transforms)
+    train_ds = YoloFormatDataset([all_pairs[i] for i in train_pairs.indices], config["img_size"], train_transforms)
+    val_ds = YoloFormatDataset([all_pairs[i] for i in val_pairs.indices], config["img_size"], val_transforms)
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=yolov2_collate_fn, num_workers=2)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=yolov2_collate_fn, num_workers=2)
+    train_loader = DataLoader(train_ds, batch_size=config["batch_size"], shuffle=True, collate_fn=yolov2_collate_fn, num_workers=2)
+    val_loader = DataLoader(val_ds, batch_size=config["batch_size"], shuffle=False, collate_fn=yolov2_collate_fn, num_workers=2)
     
-    # 512 / 32 = 16
-    feature_map_shape = (IMG_SIZE[0] // 32, IMG_SIZE[1] // 32)
+    # 5. Training Components
+    f_map_shape = (config["img_size"][0] // 32, config["img_size"][1] // 32)
+    target_calculator = YoloV2TargetCalculator(config["num_classes"], anchors, f_map_shape)
+    criterion = YoloV2Loss(config["num_classes"], config["num_anchors"])
     
-    target_calculator = YoloV2TargetCalculator(NUM_CLASSES, anchors, feature_map_shape)
-    criterion = YoloV2Loss(NUM_CLASSES, NUM_ANCHORS)
-    
-    # Only pass trainable parameters to the optimizer
     trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.Adam(trainable_params, lr=1e-4)
+    optimizer = torch.optim.Adam(trainable_params, lr=config["lr"])
+
+    # OneCycleLR Scheduler
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=config["lr"], 
+        steps_per_epoch=len(train_loader), 
+        epochs=config["epochs"]
+    )
 
     from mypt.loggers import get_logger
-    logger = get_logger('tensorboard', log_dir=ARTIFACT_DIR)
+    logger = get_logger('tensorboard', log_dir=artifact_root)
     
     # 6. Run Training
     run_training_loop(
@@ -176,11 +199,14 @@ def main():
         target_calculator=target_calculator,
         criterion=criterion,
         device=DEVICE,
-        epochs=EPOCHS,
-        artifact_dir=ARTIFACT_DIR,
-        early_stop_patience=10,
+        epochs=config["epochs"],
+        artifact_dir=artifact_root,
+        early_stop_patience=config["early_stop_patience"],
         logger=logger,
+        scheduler=scheduler,
+        lr_update_level="batch"
     )
 
 if __name__ == "__main__":
     main()
+

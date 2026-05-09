@@ -10,6 +10,7 @@ dependencies = [
     "kagglehub>=1.0.1",
     "opencv-contrib-python>=4.13.0.92",
     "opencv-python>=4.13.0.92",
+    "pandas>=3.0.2",
 ]
 
 # Ensure that PyTorch is installed with correct CUDA version based on platform
