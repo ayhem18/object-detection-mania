@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torchvision.transforms import v2
 from typing import Tuple, List, Union, Callable
 
-from object_detection_mania.data.synthetic_toy_ds.visualize_scenes import render_scene
+from home_made_od.data.synthetic_toy_ds.visualize_scenes import render_scene
 
 class YoloV2Dataset(Dataset):
     def __init__(self, 
