@@ -1,18 +1,21 @@
 import os
 import torch
+import cv2
+import numpy as np
 from PIL import Image, ImageOps
 from pathlib import Path
 from torchvision import tv_tensors
 from torch.utils.data import Dataset
 from torchvision.transforms import v2
-from typing import Tuple, List, Union, Callable, Optional
+from typing import Tuple, List, Union, Callable, Optional, Literal
 
 class YoloFormatDataset(Dataset):
     def __init__(self, 
                  data_pairs: List[Tuple[str, str]],
                  img_shape: Tuple[int, int],
                  transforms: Union[Callable, List[Callable]],
-                 filter_fn: Optional[Callable] = None):
+                 filter_fn: Optional[Callable] = None,
+                 engine: Literal["cv2", "pil"] = "cv2"):
         """
         A PyTorch Dataset for YOLO-format data that forces a fixed output size.
         
@@ -21,6 +24,7 @@ class YoloFormatDataset(Dataset):
             img_shape: Target image dimensions (H, W) to enforce fixed sizes.
             transforms: torchvision v2 transforms.
             filter_fn: A callable taking (img_path, label_path) returning True if it should be included.
+            engine: The image loading engine to use ('cv2' or 'pil').
         """
         if filter_fn is not None:
             self.data_pairs = [pair for pair in data_pairs if filter_fn(pair[0], pair[1])]
@@ -28,6 +32,7 @@ class YoloFormatDataset(Dataset):
             self.data_pairs = data_pairs
             
         self.img_shape = img_shape
+        self.engine = engine.lower()
         
         # Normalize transforms into a list
         if hasattr(transforms, 'transforms'):
@@ -39,6 +44,18 @@ class YoloFormatDataset(Dataset):
             
         self._verify_and_append_transforms()
         self.transforms = v2.Compose(self.transforms_list)
+
+    def _load_image(self, img_path: str) -> Union[Image.Image, np.ndarray]:
+        """Loads image using the specified engine."""
+        if self.engine == "pil":
+            img = Image.open(img_path)
+            return ImageOps.exif_transpose(img).convert("RGB")
+        else:
+            # OpenCV approach
+            img = cv2.imread(img_path)
+            if img is None:
+                raise FileNotFoundError(f"Failed to load image at {img_path}")
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     def _verify_and_append_transforms(self):
         """Ensures Resize, ToImage, and ToDtype are present for fixed input size."""
@@ -59,10 +76,14 @@ class YoloFormatDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         img_path, label_path = self.data_pairs[idx]
         
-        # Load as PIL Image and apply EXIF orientation to prevent rotation issues
-        img = Image.open(img_path)
-        img = ImageOps.exif_transpose(img).convert("RGB")
-        w_orig, h_orig = img.size
+        # Load image using the selected engine
+        img = self._load_image(img_path)
+        
+        # Get dimensions (PIL uses .size, OpenCV/Numpy uses .shape)
+        if hasattr(img, 'size'):
+            w_orig, h_orig = img.size
+        else:
+            h_orig, w_orig = img.shape[:2]
         
         targets = []
         if os.path.exists(label_path):
@@ -83,9 +104,13 @@ class YoloFormatDataset(Dataset):
         
         # YOLO bounding boxes are normalized to [0, 1].
         # torchvision v2 transforms expect absolute coordinates based on the original image size.
-        bboxes_abs = bboxes.clone()
-        bboxes_abs[:, [0, 2]] *= w_orig
-        bboxes_abs[:, [1, 3]] *= h_orig
+        # Avoid clone: create a new tensor with absolute coordinates
+        bboxes_abs = torch.cat([
+            (bboxes[:, 0] * w_orig).unsqueeze(1),
+            (bboxes[:, 1] * h_orig).unsqueeze(1),
+            (bboxes[:, 2] * w_orig).unsqueeze(1),
+            (bboxes[:, 3] * h_orig).unsqueeze(1)
+        ], dim=1)
         
         boxes_datapoint = tv_tensors.BoundingBoxes(
             bboxes_abs, 
@@ -100,9 +125,13 @@ class YoloFormatDataset(Dataset):
         _, h_new, w_new = img.shape
         
         # Convert the transformed absolute boxes back to normalized boxes
-        bboxes_out = boxes_transformed.clone()
-        bboxes_out[:, [0, 2]] /= w_new
-        bboxes_out[:, [1, 3]] /= h_new
+        # Avoid clone: create the output tensor directly
+        bboxes_out = torch.cat([
+            (boxes_transformed[:, 0] / w_new).unsqueeze(1),
+            (boxes_transformed[:, 1] / h_new).unsqueeze(1),
+            (boxes_transformed[:, 2] / w_new).unsqueeze(1),
+            (boxes_transformed[:, 3] / h_new).unsqueeze(1)
+        ], dim=1)
         
         # Recombine into [cls_id, cx, cy, w, h]
         final_targets = torch.cat([cls_ids.unsqueeze(1), bboxes_out], dim=1)

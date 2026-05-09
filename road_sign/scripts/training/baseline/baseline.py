@@ -103,7 +103,7 @@ def main():
     seed_everything(42)
     
     # --- Configuration ---
-    DATA_DIR = os.path.join(road_sign_root, 'data')
+    DATA_DIR = os.path.join(road_sign_root, 'data_512')
     ARTIFACT_DIR = os.path.join(road_sign_root, 'artifacts', 'baseline')
     IMG_SIZE = (512, 512)
     BATCH_SIZE = 256

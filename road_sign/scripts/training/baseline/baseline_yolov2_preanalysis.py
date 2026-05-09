@@ -177,7 +177,7 @@ def visualize_dataset(data_pairs, img_size=(512, 512), max_per_class=5):
 
 if __name__ == '__main__':
     seed_everything(42)
-    data_dir = os.path.join(road_sign_root, 'data')
+    data_dir = os.path.join(road_sign_root, 'data_512')
     pairs = get_data_pairs(data_dir)
     if not pairs:
         print("No data pairs found. Exiting.")
