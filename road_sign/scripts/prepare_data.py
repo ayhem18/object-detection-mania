@@ -202,7 +202,7 @@ def coco_to_yolo(data_dir):
 
 if __name__ == "__main__":
     try:
-        # data_path = download_dataset()
+        data_path = download_dataset()
         # Assume data is already downloaded for this debugging step
         data_path = os.path.join(road_sign_root, 'data')
         

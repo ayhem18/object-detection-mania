@@ -94,7 +94,11 @@ def build_model(num_classes, num_anchors):
     # Return both model and the ImageNet transform expected by the weights
     return model, resnet_fe.transform
 
+from dotenv import load_dotenv
+
 def main():
+    load_dotenv()
+    
     # Set seed for reproducibility
     seed_everything(42)
     
@@ -102,7 +106,7 @@ def main():
     DATA_DIR = os.path.join(road_sign_root, 'data')
     ARTIFACT_DIR = os.path.join(road_sign_root, 'artifacts', 'baseline')
     IMG_SIZE = (512, 512)
-    BATCH_SIZE = 4
+    BATCH_SIZE = 256
     EPOCHS = 50
     NUM_CLASSES = 8
     NUM_ANCHORS = 5
@@ -161,8 +165,8 @@ def main():
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(trainable_params, lr=1e-4)
 
-    from mypt.loggers import TensorBoardLogger
-    logger = TensorBoardLogger(log_dir=ARTIFACT_DIR)
+    from mypt.loggers import get_logger
+    logger = get_logger('tensorboard', log_dir=ARTIFACT_DIR)
     
     # 6. Run Training
     run_training_loop(

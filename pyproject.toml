@@ -10,10 +10,15 @@ dependencies = [
     "kagglehub>=1.0.1",
 ]
 
-# Ensure that PyTorch is installed with CUDA 11.8 across the entire workspace
+# Ensure that PyTorch is installed with correct CUDA version based on platform
 [[tool.uv.index]]
-name = "pytorch-cu11.8"
+name = "pytorch-cu118"
 url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [tool.uv.workspace]
@@ -27,8 +32,17 @@ members = [
 home-made-od = { workspace = true, editable = true }
 mypt = { workspace = true, editable = true }
 
-# These sources, in combination with the index above, ensure that uv add torch
-# or uv add torchvision installs the CUDA 11.8 version globally
-torch = { index = "pytorch-cu11.8" }
-torchvision = { index = "pytorch-cu11.8" }
-torchaudio = { index = "pytorch-cu11.8" }
+# These sources, in combination with the index above, ensure that uv sync
+# installs the correct CUDA version based on the operating system
+torch = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
+]
+torchvision = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
+]
+torchaudio = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
+]

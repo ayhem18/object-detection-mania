@@ -18,7 +18,7 @@ sys.path.append(os.path.join(road_sign_root, 'utils'))
 sys.path.append(os.path.join(road_sign_root, 'scripts'))
 
 def analyze_dataset(data_dir):
-    coco_files = list(Path(data_dir).rglob("*.json"))
+    coco_files = list(Path(data_dir).rglob("*annotations.json"))
     if not coco_files:
         print("No COCO JSON files found for analysis.")
         return
