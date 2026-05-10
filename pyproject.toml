@@ -5,6 +5,7 @@ description = "Monorepo for my object detection fundamentals and competitions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "ensemble-boxes>=1.0.9",
     # Include my custom package so root scripts can import it easily
     "home-made-od",
     "kagglehub>=1.0.1",

@@ -5,9 +5,9 @@ import numpy as np
 import json
 import yaml
 import hashlib
+from tqdm import tqdm
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
-from tqdm import tqdm
 
 # Path setup logic
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -1,0 +1,11 @@
+K2: 2
+min_scale_ratio_threshold: 0.5
+min_visibility_threshold: 0.4
+num_anchors: 5
+scales:
+- 512
+- 1024
+- 2048
+target_size:
+- 512
+- 512

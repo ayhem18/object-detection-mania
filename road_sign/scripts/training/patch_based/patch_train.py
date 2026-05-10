@@ -108,12 +108,25 @@ DEFAULT_CONFIG = {
 def main():
     load_dotenv()
     
+    # 1. Config Management
     config = DEFAULT_CONFIG.copy()
+    DATA_DIR = os.path.join(road_sign_root, config["data_dir"])
+
+    # --- Load Patch Config generated during dataset preparation ---
+    patch_config_path = os.path.join(DATA_DIR, "patch_config.yaml")
+    if os.path.exists(patch_config_path):
+        with open(patch_config_path, "r") as f:
+            config["patch_config"] = yaml.safe_load(f)
+        print(f"Merged patch configuration from {patch_config_path}")
+    else:
+        print(f"Warning: No patch_config.yaml found in {DATA_DIR}. Hashing might not be fully reproducible.")
+
     config_hash = get_config_hash(config)
     
     artifact_root = os.path.join(road_sign_root, 'artifacts', 'patch_based', config_hash)
     os.makedirs(artifact_root, exist_ok=True)
     
+    # Save active config for reproducibility
     with open(os.path.join(artifact_root, "config.yaml"), "w") as f:
         yaml.dump(config, f)
         
@@ -123,8 +136,6 @@ def main():
     seed_everything(config["seed"])
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    DATA_DIR = os.path.join(road_sign_root, config["data_dir"])
-    
     # --- Load Anchors generated during dataset preparation ---
     anchors_path = os.path.join(DATA_DIR, "anchors.json")
     if os.path.exists(anchors_path):
