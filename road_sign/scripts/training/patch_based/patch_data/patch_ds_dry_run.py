@@ -20,8 +20,23 @@ sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_ba
 # Import the core logic
 from prepare_patches import generate_positive_patches, update_labels_for_patch
 
-def run_dry_run(source_data_dir):
+# Use the same default config as the preparation script
+DEFAULT_CONFIG = {
+    "scales": [512, 1024, 2048],
+    "min_scale_ratio_threshold": 0.5,
+    "min_visibility_threshold": 0.4,
+    "K2": 2,
+    "target_size": [512, 512],
+    "num_anchors": 5
+}
+
+def run_dry_run(source_data_dir, config=None):
+    if config is None:
+        config = DEFAULT_CONFIG
+        
     print("--- Starting Dry Run for Adaptive Patching Algorithm ---")
+    print(f"Configuration: {config}")
+    
     img_dir = os.path.join(source_data_dir, 'train', 'images')
     lbl_dir = os.path.join(source_data_dir, 'labels', 'annotations')
     
@@ -42,15 +57,13 @@ def run_dry_run(source_data_dir):
         return
 
     total_orig_objects = 0
-    patch_size_counts = {512: 0, 1024: 0, 2048: 0}
+    patch_size_counts = {s: 0 for s in config["scales"]}
     final_area_ratios = []
     
-    # We iterate using PIL to quickly get image dimensions without loading full images into memory
     for img_path, lbl_path in tqdm(pairs, desc="Simulating Patches"):
         with Image.open(img_path) as img:
             w, h = img.size
             
-        # Parse ground truth boxes
         gt_boxes = []
         with open(lbl_path, 'r') as f:
             for line in f:
@@ -66,31 +79,27 @@ def run_dry_run(source_data_dir):
         total_orig_objects += len(gt_boxes)
 
         # Simulate positive patches generation
-        pos_coords = generate_positive_patches((h, w), gt_boxes)
+        pos_coords = generate_positive_patches((h, w), gt_boxes, config)
         
-        # Analyze each generated patch
         for coords in pos_coords:
             x1, y1, x2, y2 = coords
             patch_w = x2 - x1
             
             # Record the patch size chosen
-            if patch_w <= 512:
-                patch_size_counts[512] += 1
-            elif patch_w <= 1024:
-                patch_size_counts[1024] += 1
+            if patch_w in patch_size_counts:
+                patch_size_counts[patch_w] += 1
             else:
-                patch_size_counts[2048] += 1
+                # Fallback for dynamic scales
+                patch_size_counts.setdefault(patch_w, 0)
+                patch_size_counts[patch_w] += 1
                 
-            # Simulate updating labels
-            patch_labels = update_labels_for_patch(coords, gt_boxes)
+            # Simulate updating labels (this handles the visibility threshold now!)
+            patch_labels = update_labels_for_patch(coords, gt_boxes, config)
             
-            # Since patches will be resized to 512x512, the normalized (w_norm * h_norm)
-            # gives us the EXACT area ratio of the object in the final resized patch!
             for lbl in patch_labels:
                 _, _, _, w_norm, h_norm = lbl
                 final_area_ratios.append(w_norm * h_norm)
 
-    # Statistical Analysis
     final_area_ratios = np.array(final_area_ratios)
     
     print("\n--- Dry Run Statistics ---")
@@ -98,8 +107,8 @@ def run_dry_run(source_data_dir):
     print(f"Total Positive Patches Generated: {sum(patch_size_counts.values())}")
     print(f"Total Valid Objects inside Patches: {len(final_area_ratios)}")
     print("\nPatch Size Distribution:")
-    for size, count in patch_size_counts.items():
-        print(f"  {size}x{size}: {count} patches")
+    for size in sorted(patch_size_counts.keys()):
+        print(f"  {size}x{size}: {patch_size_counts[size]} patches")
         
     print("\nFinal Object Area Ratios (Object Area / Patch Area):")
     if len(final_area_ratios) > 0:
@@ -138,11 +147,11 @@ def run_dry_run(source_data_dir):
     plt.tight_layout()
     artifacts_dir = Path(road_sign_root) / 'artifacts' / 'patch_visualization'
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    plot_path = artifacts_dir / 'adaptive_patch_dry_run_ratio_dist.png'
+    plot_path = artifacts_dir / 'adaptive_patch_dry_run_ratio_dist_updated.png'
     plt.savefig(plot_path)
     plt.close()
     print(f"\nPlot saved to {plot_path}")
 
 if __name__ == "__main__":
     SOURCE_DIR = os.path.join(road_sign_root, 'data')
-    run_dry_run(SOURCE_DIR)
+    run_dry_run(SOURCE_DIR, DEFAULT_CONFIG)

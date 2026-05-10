@@ -1,13 +1,14 @@
 import os
 import sys
-import torch
 import cv2
+import torch
 import pandas as pd
-import numpy as np
+
+from tqdm import tqdm
 from pathlib import Path
+from typing import Optional
 from torchvision.transforms import v2
 from torch.utils.data import Dataset, DataLoader
-from tqdm import tqdm
 
 # --- Path Setup ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -105,7 +106,7 @@ def build_model(num_classes, num_anchors):
     
     return model, resnet_fe.transform
 
-def visualize_predictions(results_dict, output_dir, max_images=10):
+def visualize_predictions(results_dict, output_dir, max_images:Optional[int]=10):
     """
     Visualizes bounding boxes on the original images for a subset of the results.
     """
@@ -114,7 +115,7 @@ def visualize_predictions(results_dict, output_dir, max_images=10):
     
     count = 0
     for img_path, preds in results_dict.items():
-        if count >= max_images:
+        if max_images is not None and count >= max_images:
             break
             
         img = cv2.imread(img_path)
@@ -136,7 +137,7 @@ def visualize_predictions(results_dict, output_dir, max_images=10):
         cv2.imwrite(out_path, small_img)
         count += 1
 
-def generate_submission(model, test_dir, output_csv, img_size, transform, class_mapping, device, anchors, batch_size=16, conf_thresh=0.25):
+def generate_submission(model, test_dir, output_csv, img_size, transform, class_mapping, device, anchors, batch_size=16, conf_thresh=0.25, boost_confidence=False):
     """
     Runs batched inference on all images in test_dir and saves a Kaggle-formatted CSV.
     """
@@ -190,6 +191,9 @@ def generate_submission(model, test_dir, output_csv, img_size, transform, class_
                 for det in preds:
                     x1, y1, x2, y2, score, cls_id = det.cpu().numpy()
                     
+                    if boost_confidence:
+                        score = min(score + 0.5, 0.99)
+
                     # YOLO outputs absolute coordinates based on the 512x512 input size.
                     # We need to scale these back to the original image dimensions.
                     scale_x = orig_w / img_size[0]
@@ -227,7 +231,7 @@ def generate_submission(model, test_dir, output_csv, img_size, transform, class_
     
     return visualization_data
 
-def main():
+def main(boost_confidence=False):
     seed_everything(42)
     
     # Configuration
@@ -239,7 +243,9 @@ def main():
     # Submission path: artifacts/baseline/submission/submission.csv
     SUBMISSION_DIR = os.path.join(os.path.dirname(os.path.dirname(CHECKPOINT_PATH)), 'submission')
     os.makedirs(SUBMISSION_DIR, exist_ok=True)
-    OUTPUT_CSV = os.path.join(SUBMISSION_DIR, 'submission.csv')
+    
+    filename = 'submission_boosted.csv' if boost_confidence else 'submission.csv'
+    OUTPUT_CSV = os.path.join(SUBMISSION_DIR, filename)
     VISUALIZATION_DIR = os.path.join(SUBMISSION_DIR, 'visualizations')
     
     IMG_SIZE = (512, 512)
@@ -276,11 +282,12 @@ def main():
 
     vis_data = generate_submission(
         model, TEST_DIR, OUTPUT_CSV, IMG_SIZE, transform_stats, 
-        class_mapping, DEVICE, anchors, batch_size=BATCH_SIZE, conf_thresh=0.25
+        class_mapping, DEVICE, anchors, batch_size=BATCH_SIZE, conf_thresh=0.1,
+        boost_confidence=boost_confidence
     )
     
-    visualize_predictions(vis_data, VISUALIZATION_DIR, max_images=20)
+    visualize_predictions(vis_data, VISUALIZATION_DIR, max_images=None)
 
 
 if __name__ == "__main__":
-    main()
+    main(boost_confidence=True)
