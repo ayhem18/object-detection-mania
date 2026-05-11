@@ -91,6 +91,80 @@ class YoloV2(nn.Module):
         
         return out
 
+    def decode_predictions(self, 
+                           raw_output: torch.Tensor, 
+                           anchors: List[List[float] | Tuple[float, float]], 
+                           img_size: Tuple[int, int],
+                           return_all_probs: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Decodes raw model output into absolute bounding boxes without confidence filtering or NMS.
+        Args:
+            raw_output: Model output (B, K*(5+C), fh, fw)
+            anchors: List of [w, h] in range [0, 1].
+            img_size: Tuple of (img_h, img_w) to scale predictions to absolute pixels.
+        Returns:
+            Tuple of Tensors:
+                - boxes: (B, fh*fw*num_anchors, 4) -> [x1, y1, x2, y2]
+                - scores: (B, fh*fw*num_anchors) -> obj_prob * max_cls_prob
+                - cls_ids: (B, fh*fw*num_anchors) -> predicted class index
+        """
+        B, _, fh, fw = raw_output.shape
+        img_h, img_w = img_size
+        stride_w = img_w / fw
+        stride_h = img_h / fh
+
+        anchors_tensor = torch.tensor(anchors, dtype=torch.float32, device=raw_output.device)
+        if anchors_tensor.shape != (self.num_anchors, 2):
+            raise ValueError(f"Expected anchors shape ({self.num_anchors}, 2), got {anchors_tensor.shape}")
+
+        out = raw_output.view(B, self.num_anchors, 5 + self.num_classes, fh, fw)
+        out = out.permute(0, 3, 4, 1, 2).contiguous()
+
+        tx = out[..., 0]
+        ty = out[..., 1]
+        tw = out[..., 2]
+        th = out[..., 3]
+        obj_logits = out[..., 4]
+        cls_logits = out[..., 5:]
+
+        cx = torch.sigmoid(tx)
+        cy = torch.sigmoid(ty)
+        obj_probs = torch.sigmoid(obj_logits)
+        cls_probs = torch.softmax(cls_logits, dim=-1)
+
+        max_cls_probs, cls_ids = torch.max(cls_probs, dim=-1)
+        scores = obj_probs * max_cls_probs
+
+        grid_y, grid_x = torch.meshgrid(torch.arange(fh, device=raw_output.device), 
+                                        torch.arange(fw, device=raw_output.device), 
+                                        indexing='ij')
+        grid_x = grid_x.unsqueeze(-1).expand(-1, -1, self.num_anchors)
+        grid_y = grid_y.unsqueeze(-1).expand(-1, -1, self.num_anchors)
+
+        anchors_w = anchors_tensor[:, 0].view(1, 1, self.num_anchors)
+        anchors_h = anchors_tensor[:, 1].view(1, 1, self.num_anchors)
+
+        actual_cx = (cx + grid_x) * stride_w
+        actual_cy = (cy + grid_y) * stride_h
+        actual_w = torch.exp(tw) * anchors_w * img_w
+        actual_h = torch.exp(th) * anchors_h * img_h
+
+        x1 = actual_cx - actual_w / 2
+        y1 = actual_cy - actual_h / 2
+        x2 = actual_cx + actual_w / 2
+        y2 = actual_cy + actual_h / 2
+
+        boxes = torch.stack([x1, y1, x2, y2], dim=-1).view(B, -1, 4)
+        scores = scores.view(B, -1)
+        cls_ids = cls_ids.view(B, -1)
+
+        if return_all_probs:
+            obj_probs = obj_probs.view(B, -1)
+            max_cls_probs = max_cls_probs.view(B, -1)
+            return boxes, scores, cls_ids, obj_probs, max_cls_probs
+
+        return boxes, scores, cls_ids
+
     def inference(self, 
                   x: torch.Tensor,
                   anchors: List[List[float] | Tuple[float, float]],
@@ -110,75 +184,17 @@ class YoloV2(nn.Module):
         with torch.no_grad():
             raw_output = self.forward(x)
 
-        B, _, fh, fw = raw_output.shape
         img_h, img_w = x.shape[2], x.shape[3]
-        stride_w = img_w / fw
-        stride_h = img_h / fh
+        boxes, scores, cls_ids = self.decode_predictions(raw_output, anchors, (img_h, img_w))
+        B = raw_output.shape[0]
 
-        # Convert anchors to tensor and move to device
-        anchors_tensor = torch.tensor(anchors, dtype=torch.float32, device=x.device)
-        if anchors_tensor.shape != (self.num_anchors, 2):
-            raise ValueError(f"Expected anchors shape ({self.num_anchors}, 2), got {anchors_tensor.shape}")
-
-        # 1. Reshape to (B, fh, fw, num_anchors, 5 + num_classes)
-        # Input: (B, K*(5+C), H, W)
-        out = raw_output.view(B, self.num_anchors, 5 + self.num_classes, fh, fw)
-        out = out.permute(0, 3, 4, 1, 2).contiguous()
-
-        # 2. Unpack
-        tx = out[..., 0]
-        ty = out[..., 1]
-        tw = out[..., 2]
-        th = out[..., 3]
-        obj_logits = out[..., 4]
-        cls_logits = out[..., 5:]
-
-        # 3. Activations
-        cx = torch.sigmoid(tx)
-        cy = torch.sigmoid(ty)
-        obj_probs = torch.sigmoid(obj_logits)
-        cls_probs = torch.softmax(cls_logits, dim=-1)
-
-        # 4. Overall Scores
-        max_cls_probs, cls_ids = torch.max(cls_probs, dim=-1)
-        scores = obj_probs * max_cls_probs
-
-        # 5. Decode BBoxes
-        # Create grid offsets
-        grid_y, grid_x = torch.meshgrid(torch.arange(fh, device=x.device), 
-                                        torch.arange(fw, device=x.device), 
-                                        indexing='ij')
-        grid_x = grid_x.unsqueeze(-1).expand(-1, -1, self.num_anchors)
-        grid_y = grid_y.unsqueeze(-1).expand(-1, -1, self.num_anchors)
-
-        # Map anchors to correct shape
-        anchors_w = anchors_tensor[:, 0].view(1, 1, self.num_anchors)
-        anchors_h = anchors_tensor[:, 1].view(1, 1, self.num_anchors)
-
-        # Decode to absolute pixels
-        actual_cx = (cx + grid_x) * stride_w
-        actual_cy = (cy + grid_y) * stride_h
-        actual_w = torch.exp(tw) * anchors_w * img_w
-        actual_h = torch.exp(th) * anchors_h * img_h
-
-        # Convert to x1y1x2y2
-        x1 = actual_cx - actual_w / 2
-        y1 = actual_cy - actual_h / 2
-        x2 = actual_cx + actual_w / 2
-        y2 = actual_cy + actual_h / 2
-
-        # 6. Flatten and NMS
         batch_results = []
         import torchvision.ops as ops
 
         for i in range(B):
-            # Flatten image-specific predictions
-            img_x1 = x1[i].view(-1)
-            img_y1 = y1[i].view(-1)
-            img_x2 = x2[i].view(-1)
-            img_y2 = y2[i].view(-1)
-            img_scores = scores[i].view(-1)
-            img_cls = cls_ids[i].view(-1)
+            img_boxes = boxes[i]
+            img_scores = scores[i]
+            img_cls = cls_ids[i]
 
             # Confidence Filter
             mask = img_scores > conf_threshold
@@ -186,22 +202,20 @@ class YoloV2(nn.Module):
                 batch_results.append(torch.zeros((0, 6), device=x.device))
                 continue
 
-            boxes = torch.stack([img_x1[mask], img_y1[mask], img_x2[mask], img_y2[mask]], dim=1)
+            b = img_boxes[mask]
             s = img_scores[mask]
             c = img_cls[mask]
 
             # Non-Maximum Suppression
             # Using class-aware NMS trick (offsetting boxes by class ID * large constant)
-            # This ensures NMS only suppresses boxes of the same class.
             max_wh = 4096 # larger than image size
             offsets = c.float() * max_wh
-            keep = ops.nms(boxes + offsets.unsqueeze(1), s, nms_iou_threshold)
+            keep = ops.nms(b + offsets.unsqueeze(1), s, nms_iou_threshold)
 
             batch_results.append(torch.cat([
-                boxes[keep], 
+                b[keep], 
                 s[keep].unsqueeze(1), 
                 c[keep].unsqueeze(1).float()
             ], dim=1))
 
         return batch_results
-
