@@ -180,61 +180,6 @@ def visualize_raw_predictions(image_paths: List[str],
 
 import torchvision.ops as ops
 
-def _render_gt_match_single(args):
-    import matplotlib
-    matplotlib.use('Agg') # Crucial for multiprocessing memory safety
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from pathlib import Path
-    
-    (img_path, ious_np, gt_coords_np, gt_classes_np, scaled_boxes_np, 
-     pred_classes_np, pred_scores_np, max_iou_idxs_np, output_dir, class_mapping) = args
-    
-    img_vis = cv2.imread(img_path)
-    if img_vis is None:
-        return False
-        
-    # # --- Visualize IoU Matrix ---
-    # plt.figure(figsize=(10, 8))
-    # sns.heatmap(ious_np, annot=True, cmap="YlGnBu", fmt=".2f")
-    # plt.title(f"IoU Matrix - {Path(img_path).name}")
-    # plt.xlabel("Predictions")
-    # plt.ylabel("Ground Truths")
-    # plt.tight_layout()
-    # iou_matrix_path = os.path.join(output_dir, f"iou_matrix_{Path(img_path).stem}.png")
-    # plt.savefig(iou_matrix_path)
-    # plt.close('all') # Prevent memory leaks
-    
-    # --- Draw Boxes ---
-    for i in range(len(gt_coords_np)):
-        gt_cls = int(gt_classes_np[i])
-        idx = int(max_iou_idxs_np[i])
-        
-        gx1, gy1, gx2, gy2 = map(int, gt_coords_np[i])
-        cv2.rectangle(img_vis, (gx1, gy1), (gx2, gy2), (0, 255, 0), 3) # Green for GT
-        
-        px1, py1, px2, py2 = map(int, scaled_boxes_np[idx])
-        cv2.rectangle(img_vis, (px1, py1), (px2, py2), (0, 0, 255), 2) # Red for Best Match
-        
-        pred_cls = int(pred_classes_np[idx])
-        pred_score = float(pred_scores_np[idx])
-        label = f"GT:{gt_cls} | Pred:{pred_cls} S:{pred_score:.2f}"
-        cv2.putText(img_vis, label, (gx1, max(gy1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-    out_name = f"match_{Path(img_path).name}"
-    cv2.imwrite(os.path.join(output_dir, out_name), img_vis)
-    return True
-
-def render_deferred_visualizations(vis_tasks):
-    if not vis_tasks:
-        return
-    import concurrent.futures
-    from tqdm import tqdm
-    print(f"Rendering {len(vis_tasks)} visualizations in parallel...")
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        list(tqdm(executor.map(_render_gt_match_single, vis_tasks), total=len(vis_tasks), desc="Rendering"))
-
-
 def analyze_gt_matches(model: YoloV2, 
                        images: torch.Tensor, 
                        gt_boxes_list: List[torch.Tensor], 
@@ -243,10 +188,26 @@ def analyze_gt_matches(model: YoloV2,
                        visualize: bool = False,
                        output_dir: Optional[str] = None,
                        image_paths: Optional[List[str]] = None,
-                       class_mapping: Optional[Dict[str, str]] = None,
-                       defer_visualization: bool = False):
+                       class_mapping: Optional[Dict[str, str]] = None) -> List[Dict]:
     """
     Analyzes the highest IoU predictions for given ground truth bounding boxes.
+    
+    Args:
+        model: Trained YoloV2 model.
+        images: Batch of images (B, C, H, W).
+        gt_boxes_list: List of length B. Each element is a tensor of shape (N, 5) 
+                       representing [cls, x1, y1, x2, y2] in ABSOLUTE original image coordinates.
+        anchors: List of anchors.
+        orig_sizes: List of original sizes corresponding to the specific user convention 
+                    where orig_sizes[0] (w) is mapped to height/y-axis and 
+                    orig_sizes[1] (h) is mapped to width/x-axis.
+        visualize: If True, saves images showing the GT and best prediction.
+        output_dir: Directory to save visualizations.
+        image_paths: Paths to original images (required if visualize=True).
+        class_mapping: Mapping for class names (required if visualize=True).
+    
+    Returns:
+        List of diagnostic dictionaries for each ground truth box.
     """
     if visualize and (output_dir is None or image_paths is None or class_mapping is None):
         raise ValueError("visualize=True requires output_dir, image_paths, and class_mapping.")
@@ -255,9 +216,12 @@ def analyze_gt_matches(model: YoloV2,
     boxes, scores, cls_ids, obj_probs, max_cls_probs = out
     
     diagnostics = []
-    vis_tasks = []
     B = images.size(0)
     target_size = (images.size(2), images.size(3)) # H, W
+    
+    class_names = []
+    if class_mapping:
+        class_names = [class_mapping.get(str(i), f"Class_{i}") for i in range(len(class_mapping))]
     
     for b in range(B):
         img_boxes = boxes[b] # (num_preds, 4) in target_size coords
@@ -288,53 +252,62 @@ def analyze_gt_matches(model: YoloV2,
         # Calculate IoU between all GT boxes and all predicted boxes
         ious = ops.box_iou(gt_coords, scaled_boxes) # (N, num_preds)
         
-        # --- Vectorized Metric Computation ---
-        w_gt_tensor = gt_coords[:, 2] - gt_coords[:, 0]
-        h_gt_tensor = gt_coords[:, 3] - gt_coords[:, 1]
-        gt_area_tensor = w_gt_tensor * h_gt_tensor
-        
-        gt_resized_w_tensor = w_gt_tensor / scale_x if scale_x > 0 else torch.zeros_like(w_gt_tensor)
-        gt_resized_h_tensor = h_gt_tensor / scale_y if scale_y > 0 else torch.zeros_like(h_gt_tensor)
-        
-        stride = 32
-        gt_area_feature_map_tensor = (gt_resized_w_tensor / stride) * (gt_resized_h_tensor / stride)
-        min_dim_feature_map_tensor = torch.minimum(gt_resized_w_tensor / stride, gt_resized_h_tensor / stride)
-        
-        img_area = orig_w * orig_h 
-        area_ratio_tensor = gt_area_tensor / img_area if img_area > 0 else torch.zeros_like(gt_area_tensor)
-        
-        max_iou_vals, max_iou_idxs = torch.max(ious, dim=1)
-        
         if visualize:
-            vis_tasks.append((
-                image_paths[b],
-                ious.cpu().numpy(),
-                gt_coords.cpu().numpy(),
-                gt_classes.cpu().numpy(),
-                scaled_boxes.cpu().numpy(),
-                img_cls_ids.cpu().numpy(),
-                img_scores.cpu().numpy(),
-                max_iou_idxs.cpu().numpy(),
-                output_dir,
-                class_mapping
-            ))
+            img_path = image_paths[b]
+            img_vis = cv2.imread(img_path)
+            
+            # --- Visualize IoU Matrix ---
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(ious.cpu().numpy(), annot=True, cmap="YlGnBu", fmt=".2f")
+            plt.title(f"IoU Matrix - {Path(img_path).name}")
+            plt.xlabel("Predictions")
+            plt.ylabel("Ground Truths")
+            plt.tight_layout()
+            iou_matrix_path = os.path.join(output_dir, f"iou_matrix_{Path(img_path).stem}.png")
+            plt.savefig(iou_matrix_path)
+            plt.close()
         
         for i in range(len(gt_boxes)):
+            gt_box = gt_coords[i]
             gt_cls = int(gt_classes[i].item())
-            idx = max_iou_idxs[i].item()
+            
+            # Bbox size and area in original image
+            w_gt = (gt_box[2] - gt_box[0]).item()
+            h_gt = (gt_box[3] - gt_box[1]).item()
+            gt_area = w_gt * h_gt
+            
+            # Resized dimensions
+            gt_resized_w = w_gt / scale_x if scale_x > 0 else 0
+            gt_resized_h = h_gt / scale_y if scale_y > 0 else 0
+            
+            # Feature map area and min dim
+            stride = 32
+            gt_area_feature_map = (gt_resized_w / stride) * (gt_resized_h / stride)
+            min_dim_feature_map = min(gt_resized_w / stride, gt_resized_h / stride)
+            
+            # Total image area
+            img_area = orig_w * orig_h 
+            area_ratio = gt_area / img_area if img_area > 0 else 0
+            
+            # Highest IoU match
+            max_iou_val, max_iou_idx = torch.max(ious[i], dim=0)
+            max_iou_val = max_iou_val.item()
+            idx = max_iou_idx.item()
             
             diag = {
                 "image_path": image_paths[b] if image_paths else None,
                 "gt_class": gt_cls,
-                "gt_width": w_gt_tensor[i].item(),
-                "gt_height": h_gt_tensor[i].item(),
-                "gt_area": gt_area_tensor[i].item(),
-                "gt_width_resized": gt_resized_w_tensor[i].item(),
-                "gt_height_resized": gt_resized_h_tensor[i].item(),
-                "gt_area_feature_map": gt_area_feature_map_tensor[i].item(),
-                "min_dim_feature_map": min_dim_feature_map_tensor[i].item(),
-                "area_ratio": area_ratio_tensor[i].item(),
-                "best_iou": max_iou_vals[i].item(),
+                "gt_width": w_gt,
+                "gt_height": h_gt,
+                "gt_area": gt_area,
+                "gt_width_resized": gt_resized_w,
+                "gt_height_resized": gt_resized_h,
+                "gt_area_feature_map": gt_area_feature_map,
+                "min_dim_feature_map": min_dim_feature_map,
+                "area_ratio": area_ratio,
+                "best_iou": max_iou_val,
                 "pred_score": img_scores[idx].item(),
                 "pred_obj_prob": img_obj_probs[idx].item(),
                 "pred_cls_prob": img_cls_probs[idx].item(),
@@ -342,12 +315,23 @@ def analyze_gt_matches(model: YoloV2,
                 "correct_class_predicted": int(img_cls_ids[idx].item()) == gt_cls
             }
             diagnostics.append(diag)
+
+            if visualize:
+                # Draw GT
+                gx1, gy1, gx2, gy2 = map(int, gt_box)
+                cv2.rectangle(img_vis, (gx1, gy1), (gx2, gy2), (0, 255, 0), 3) # Green for GT
+                
+                # Draw Best Pred
+                px1, py1, px2, py2 = map(int, scaled_boxes[idx])
+                cv2.rectangle(img_vis, (px1, py1), (px2, py2), (0, 0, 255), 2) # Red for Best Match
+                
+                label = f"GT:{gt_cls} | Pred:{diag['pred_class']} S:{diag['pred_score']:.2f}"
+                cv2.putText(img_vis, label, (gx1, max(gy1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        if visualize:
+            out_name = f"match_{Path(image_paths[b]).name}"
+            cv2.imwrite(os.path.join(output_dir, out_name), img_vis)
             
-    if visualize and not defer_visualization and vis_tasks:
-        render_deferred_visualizations(vis_tasks)
-            
-    if defer_visualization:
-        return diagnostics, vis_tasks
     return diagnostics
 
 

@@ -137,7 +137,7 @@ def visualize_predictions(results_dict, output_dir, max_images:Optional[int]=10)
         cv2.imwrite(out_path, small_img)
         count += 1
 
-def generate_submission(model, test_dir, output_csv, img_size, transform, class_mapping, device, anchors, batch_size=16, conf_thresh=0.25, boost_confidence=False):
+def generate_submission(model, test_dir, output_csv, img_size, transform, class_mapping, device, anchors, batch_size=16, conf_thresh=0.05, nms_iou_threshold=0.2):
     """
     Runs batched inference on all images in test_dir and saves a Kaggle-formatted CSV.
     """
@@ -173,7 +173,7 @@ def generate_submission(model, test_dir, output_csv, img_size, transform, class_
             orig_heights = batch_orig_dims[1].numpy()
             
             # Run batched inference
-            batch_preds = model.inference(batch_tensors, anchors=anchors, conf_threshold=conf_thresh, nms_iou_threshold=0.4)
+            batch_preds = model.inference(batch_tensors, anchors=anchors, conf_threshold=conf_thresh, nms_iou_threshold=nms_iou_threshold)
             
             for i, preds in enumerate(batch_preds):
                 img_path = batch_paths[i]
@@ -190,9 +190,6 @@ def generate_submission(model, test_dir, output_csv, img_size, transform, class_
                 
                 for det in preds:
                     x1, y1, x2, y2, score, cls_id = det.cpu().numpy()
-                    
-                    if boost_confidence:
-                        score = min(score + 0.5, 0.99)
 
                     # YOLO outputs absolute coordinates based on the 512x512 input size.
                     # We need to scale these back to the original image dimensions.
@@ -231,7 +228,7 @@ def generate_submission(model, test_dir, output_csv, img_size, transform, class_
     
     return visualization_data
 
-def main(boost_confidence=False):
+def main():
     seed_everything(42)
     
     # Configuration
@@ -240,11 +237,15 @@ def main(boost_confidence=False):
     CHECKPOINT_PATH = os.path.join(road_sign_root, 'artifacts', 'baseline', '893b8fced220f0a96492f50a02a8da7e', 'checkpoints', 'best_model.pt')
     TEST_DIR = os.path.join(road_sign_root, 'data', 'test', 'images')
     
+    # Thresholds matching validation setup
+    CONF_THRESH = 0.05
+    NMS_THRESH = 0.4
+    
     # Submission path: artifacts/baseline/submission/submission.csv
     SUBMISSION_DIR = os.path.join(os.path.dirname(os.path.dirname(CHECKPOINT_PATH)), 'submission')
     os.makedirs(SUBMISSION_DIR, exist_ok=True)
     
-    filename = 'submission_boosted.csv' if boost_confidence else 'submission.csv'
+    filename = f'submission_conf{CONF_THRESH}_nms{NMS_THRESH}.csv'
     OUTPUT_CSV = os.path.join(SUBMISSION_DIR, filename)
     VISUALIZATION_DIR = os.path.join(SUBMISSION_DIR, 'visualizations')
     
@@ -282,12 +283,12 @@ def main(boost_confidence=False):
 
     vis_data = generate_submission(
         model, TEST_DIR, OUTPUT_CSV, IMG_SIZE, transform_stats, 
-        class_mapping, DEVICE, anchors, batch_size=BATCH_SIZE, conf_thresh=0.1,
-        boost_confidence=boost_confidence
+        class_mapping, DEVICE, anchors, batch_size=BATCH_SIZE, 
+        conf_thresh=CONF_THRESH, nms_iou_threshold=NMS_THRESH
     )
     
-    visualize_predictions(vis_data, VISUALIZATION_DIR, max_images=None)
+    # visualize_predictions(vis_data, VISUALIZATION_DIR, max_images=None)
 
 
 if __name__ == "__main__":
-    main(boost_confidence=True)
+    main()
