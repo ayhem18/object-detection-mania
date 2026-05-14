@@ -3,7 +3,6 @@ import sys
 import json
 import yaml
 import torch
-import hashlib
 
 from pathlib import Path
 from torchvision.transforms import v2
@@ -24,83 +23,27 @@ road_sign_root = os.path.join(workspace_root, 'road_sign')
 
 sys.path.insert(0, workspace_root)
 
-from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
 from home_made_od.yolo_family.losses.yolov2_loss import YoloV2Loss
-from home_made_od.yolo_family.target_calculation.single_scale_no_ignore import YoloV2TargetCalculator
-from home_made_od.yolo_v2.modules.yolov2_train import run_training_loop
+from home_made_od.yolo_family.target_calculation.single_scale_no_ignore import SingleScaleNoIgnoreTargetCalculator
+from home_made_od.yolo_family.yolov2.yolov2_train import run_training_loop
 from road_sign.utils.data_utils import YoloFormatDataset, yolov2_collate_fn
 
-from mypt.backbones.resnetFE import ResnetFE
 from mypt.code_utils.pytorch_utils import seed_everything
-
-def split_by_original_image(data_dir, train_ratio=0.9):
-    img_dir = os.path.join(data_dir, 'train', 'images')
-    label_dir = os.path.join(data_dir, 'labels', 'annotations')
-    
-    all_subdirs = [d for d in os.listdir(img_dir) if os.path.isdir(os.path.join(img_dir, d))]
-    
-    import random
-    random.shuffle(all_subdirs)
-    split_idx = int(len(all_subdirs) * train_ratio)
-    
-    train_subdirs = all_subdirs[:split_idx]
-    val_subdirs = all_subdirs[split_idx:]
-    
-    def gather_pairs(subdirs):
-        pairs = []
-        for subdir_name in subdirs:
-            img_subdir = os.path.join(img_dir, subdir_name)
-            lbl_subdir = os.path.join(label_dir, subdir_name)
-            if not os.path.exists(lbl_subdir): continue
-            
-            for img_file in os.listdir(img_subdir):
-                if img_file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    stem = Path(img_file).stem
-                    label_file = os.path.join(lbl_subdir, f"{stem}.txt")
-                    if os.path.exists(label_file):
-                        pairs.append((os.path.join(img_subdir, img_file), label_file))
-        return pairs
-        
-    return gather_pairs(train_subdirs), gather_pairs(val_subdirs)
-
-def build_model(num_classes, num_anchors):
-    resnet_fe = ResnetFE(
-        build_by_layer=True,
-        num_extracted_layers=-1, 
-        num_extracted_bottlenecks=-1,
-        freeze=2, 
-        freeze_by_layer=True,
-        add_global_average=False,
-        architecture=50
-    )
-    
-    backbone_out_channels = 2048 
-    
-    model = YoloV2(
-        backbone=resnet_fe,
-        backbone_out_channels=backbone_out_channels,
-        num_anchors=num_anchors,
-        num_classes=num_classes,
-        num_conv_blocks=2
-    )
-    
-    return model, resnet_fe.transform
-
-def get_config_hash(config_dict):
-    config_str = json.dumps(config_dict, sort_keys=True)
-    return hashlib.md5(config_str.encode()).hexdigest()
+from road_sign.scripts.training.patch_based.train_scripts.train_utils import build_model, get_config_hash, prepare_data_and_anchors
 
 from dotenv import load_dotenv
 
 # --- Default Configuration ---
 DEFAULT_CONFIG = {
-    "experiment_name": "patch_adaptive_resnet50",
+    "experiment_name": "patch_adaptive_resnet50_v1",
     "data_dir": "data_patch_adaptive",
     "img_size": [512, 512],
     "batch_size": 128, 
     "epochs": 150,    
     "lr": 1e-3,       
     "num_classes": 8,
+    "num_anchors": 5,
+    "train_ratio": 0.9,
     "early_stop_patience": 20,
     "seed": 42
 }
@@ -121,8 +64,23 @@ def main():
     else:
         print(f"Warning: No patch_config.yaml found in {DATA_DIR}. Hashing might not be fully reproducible.")
 
-    config_hash = get_config_hash(config)
+    seed_everything(config["seed"])
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # --- Data Splitting, Hashing, and Anchor Generation ---
+    train_pairs, val_pairs, anchors, split_hash_dir = prepare_data_and_anchors(
+        data_dir=DATA_DIR, 
+        train_ratio=config["train_ratio"], 
+        seed=config["seed"], 
+        num_anchors=config["num_anchors"]
+    )
     
+    print(f"Found {len(train_pairs)} training patches and {len(val_pairs)} validation patches.")
+    config["anchors"] = anchors
+    config["split_hash_dir"] = split_hash_dir
+    
+    # --- Experiment Hashing ---
+    config_hash = get_config_hash(config)
     artifact_root = os.path.join(road_sign_root, 'artifacts', 'patch_based', config_hash)
     os.makedirs(artifact_root, exist_ok=True)
     
@@ -133,24 +91,8 @@ def main():
     print(f"--- Experiment Hash: {config_hash} ---")
     print(f"Artifacts will be saved to: {artifact_root}")
 
-    seed_everything(config["seed"])
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # --- Load Anchors generated during dataset preparation ---
-    anchors_path = os.path.join(DATA_DIR, "anchors.json")
-    if os.path.exists(anchors_path):
-        with open(anchors_path, "r") as f:
-            anchors = json.load(f)["anchors"]
-        print(f"Loaded anchors from {anchors_path}: {anchors}")
-    else:
-        raise FileNotFoundError(f"Anchors not found at {anchors_path}. Please run prepare_patch_ds.py first.")
-    
-    num_anchors = len(anchors)
-
-    train_pairs, val_pairs = split_by_original_image(DATA_DIR, train_ratio=0.9)
-    print(f"Found {len(train_pairs)} training patches and {len(val_pairs)} validation patches.")
-
-    model, imagenet_transform = build_model(config["num_classes"], num_anchors)
+    # --- Model and Dataloaders ---
+    model, imagenet_transform = build_model(config["num_classes"], config["num_anchors"])
     model = model.to(DEVICE)
     
     mean, std = imagenet_transform.mean, imagenet_transform.std
@@ -178,8 +120,8 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=config["batch_size"], shuffle=False, collate_fn=yolov2_collate_fn, num_workers=2)
     
     feature_map_shape = (config["img_size"][0] // 32, config["img_size"][1] // 32)
-    target_calculator = YoloV2TargetCalculator(config["num_classes"], anchors, feature_map_shape)
-    criterion = YoloV2Loss(config["num_classes"], num_anchors)
+    target_calculator = SingleScaleNoIgnoreTargetCalculator(config["num_classes"], anchors, feature_map_shape)
+    criterion = YoloV2Loss(config["num_classes"], config["num_anchors"])
     
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(trainable_params, lr=config["lr"])

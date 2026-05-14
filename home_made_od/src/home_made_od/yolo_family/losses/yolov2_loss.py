@@ -283,3 +283,177 @@ class YoloV2Loss(nn.Module):
             }
             
         return total_loss
+
+
+class SSIgnoreMaskYoloV2Loss(nn.Module):
+    def __init__(self, 
+                 num_classes: int, 
+                 num_anchors: int, 
+                 reg_loss_type: str = "mse", 
+                 background_obj_coeff: float = 0.25,
+                 lambda_coord: float = 5.0,
+                 lambda_obj: float = 1.0,
+                 lambda_cls: float = 1.0):
+        """
+        YOLOv2 Loss implementation with Ignore Mask support and Mean Reduction.
+        
+        Args:
+            num_classes (int): Number of classes.
+            num_anchors (int): Number of anchors per cell.
+            reg_loss_type (str): Type of regression loss ('mse' or 'giou').
+            background_obj_coeff (float): Multiplier for objectness loss in cells without objects (lambda_noobj).
+            lambda_coord (float): Multiplier for coordinate regression loss.
+            lambda_obj (float): Multiplier for objectness loss in cells WITH objects.
+            lambda_cls (float): Multiplier for classification loss.
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.num_anchors = num_anchors
+        self.reg_loss_type = reg_loss_type.lower()
+        self.background_obj_coeff = background_obj_coeff
+        self.lambda_coord = lambda_coord
+        self.lambda_obj = lambda_obj
+        self.lambda_cls = lambda_cls
+        
+        if self.reg_loss_type not in ["mse", "giou"]:
+            raise ValueError(f"reg_loss_type must be 'mse' or 'giou'. Got: {reg_loss_type}")
+
+    def _reshape_and_permute(self, x: torch.Tensor) -> torch.Tensor:
+        """Reshapes (B, K*(5+C), H, W) to (B, K, H, W, 5+C)"""
+        B, _, H, W = x.shape
+        K = self.num_anchors
+        C = self.num_classes
+        return x.view(B, K, 5 + C, H, W).permute(0, 1, 3, 4, 2).contiguous()
+
+    def _compute_unreduced_loss(self, preds: torch.Tensor, target_tensor: torch.Tensor, ignore_mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Computes fully vectorized unreduced loss, aggregated per image.
+        """
+        B = preds.shape[0]
+        target_obj = target_tensor[..., 4]
+        obj_mask = target_obj > 0
+        bg_mask = (~obj_mask) & (~ignore_mask)
+        
+        # 1. Objectness Loss (Vectorized per image)
+        bce_pos = F.binary_cross_entropy_with_logits(preds[..., 4], target_obj, reduction='none')
+        loss_obj_pos_img = (bce_pos * obj_mask).view(B, -1).sum(dim=1) * self.lambda_obj
+
+        bce_neg = F.binary_cross_entropy_with_logits(preds[..., 4], target_obj, reduction='none')
+        loss_obj_neg_img = (bce_neg * bg_mask).view(B, -1).sum(dim=1) * self.background_obj_coeff
+
+        loss_obj_img = loss_obj_pos_img + loss_obj_neg_img
+        
+        # 2. Regression and Classification
+        loss_reg_img = torch.zeros(B, device=preds.device)
+        loss_cls_img = torch.zeros(B, device=preds.device)
+        
+        if obj_mask.any():
+            # Get flat tensors for all objects across the batch
+            p_obj_cells = preds[obj_mask]
+            t_obj_cells = target_tensor[obj_mask]
+            
+            p_xy = torch.sigmoid(p_obj_cells[:, 0:2])
+            t_xy = t_obj_cells[:, 0:2]
+            p_wh = p_obj_cells[:, 2:4]
+            t_wh = t_obj_cells[:, 2:4]
+            
+            # Reg loss per object
+            reg_loss_flat = (F.mse_loss(p_xy, t_xy, reduction='none').sum(dim=1) + 
+                             F.mse_loss(p_wh, t_wh, reduction='none').sum(dim=1)) * self.lambda_coord
+            
+            # Cls loss per object
+            t_idx = torch.argmax(t_obj_cells[:, 5:], dim=1)
+            cls_loss_flat = F.cross_entropy(p_obj_cells[:, 5:], t_idx, reduction='none') * self.lambda_cls
+
+            # Scatter add the flattened object losses back to their respective images
+            batch_indices = torch.nonzero(obj_mask, as_tuple=True)[0]
+            loss_reg_img.scatter_add_(0, batch_indices, reg_loss_flat)
+            loss_cls_img.scatter_add_(0, batch_indices, cls_loss_flat)
+
+        num_objs_per_image = obj_mask.view(B, -1).sum(dim=1)
+
+        return {
+            "loss_obj": loss_obj_img,
+            "loss_reg": loss_reg_img,
+            "loss_cls": loss_cls_img,
+            "num_objects": num_objs_per_image
+        }
+
+    def forward(self, 
+                preds: torch.Tensor, 
+                targets: Tuple[torch.Tensor, torch.Tensor], 
+                reduce: bool = True,
+                return_all_losses: bool = False) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        
+        target_tensor, ignore_mask = targets
+        preds = self._reshape_and_permute(preds)
+        target_tensor = self._reshape_and_permute(target_tensor)
+        
+        # ignore_mask from SingleScaleIgnoreTargetCalculator is (B, H, W, K)
+        # we need it in (B, K, H, W) to match target_obj
+        ignore_mask = ignore_mask.permute(0, 3, 1, 2)
+        
+        if not reduce:
+            return self._compute_unreduced_loss(preds, target_tensor, ignore_mask)
+        
+        # Efficient Reduced Path
+        target_obj = target_tensor[..., 4]
+        obj_mask = target_obj > 0
+        bg_mask = (~obj_mask) & (~ignore_mask)
+        
+        num_pos = max(1.0, obj_mask.sum().item())
+        num_ignored = ignore_mask.sum().item()
+        
+        # Tracking logits for debugging
+        mean_logit_pos = preds[..., 4][obj_mask].mean() if obj_mask.any() else torch.tensor(0.0, device=preds.device)
+        mean_logit_neg = preds[..., 4][bg_mask].mean() if bg_mask.any() else torch.tensor(0.0, device=preds.device)
+        
+        # 1. Objectness Loss (Mean by effective count)
+        p_obj_pos = preds[..., 4][obj_mask]
+        t_obj_pos = target_obj[obj_mask]
+        if len(p_obj_pos) > 0:
+            loss_obj_pos = F.binary_cross_entropy_with_logits(p_obj_pos, t_obj_pos, reduction='mean') * self.lambda_obj
+        else:
+            loss_obj_pos = torch.tensor(0.0, device=preds.device)
+
+        p_obj_neg = preds[..., 4][bg_mask]
+        t_obj_neg = target_obj[bg_mask]
+        if len(p_obj_neg) > 0:
+            loss_obj_neg = F.binary_cross_entropy_with_logits(p_obj_neg, t_obj_neg, reduction='mean') * self.background_obj_coeff
+        else:
+            loss_obj_neg = torch.tensor(0.0, device=preds.device)
+            
+        loss_obj = loss_obj_pos + loss_obj_neg
+        
+        # 2. Regression and Classification (Mean by effective count)
+        loss_reg = torch.tensor(0.0, device=preds.device)
+        loss_cls = torch.tensor(0.0, device=preds.device)
+        
+        if obj_mask.any():
+            p_obj_cells = preds[obj_mask]
+            t_obj_cells = target_tensor[obj_mask]
+            
+            # Mean over all positive boxes
+            loss_xy = F.mse_loss(torch.sigmoid(p_obj_cells[:, 0:2]), t_obj_cells[:, 0:2], reduction='mean')
+            loss_wh = F.mse_loss(p_obj_cells[:, 2:4], t_obj_cells[:, 2:4], reduction='mean')
+            loss_reg = (loss_xy + loss_wh) * self.lambda_coord
+            
+            t_class_idx = torch.argmax(t_obj_cells[:, 5:], dim=1)
+            loss_cls = F.cross_entropy(p_obj_cells[:, 5:], t_class_idx, reduction='mean') * self.lambda_cls
+            
+        total_loss = loss_obj + loss_reg + loss_cls
+        
+        if return_all_losses:
+            return {
+                "total_loss": total_loss,
+                "loss_obj": loss_obj,
+                "loss_reg": loss_reg,
+                "loss_cls": loss_cls,
+                "num_objects": torch.tensor(num_pos if obj_mask.any() else 0, device=preds.device),
+                "num_ignored": torch.tensor(num_ignored, device=preds.device),
+                "mean_logit_pos": mean_logit_pos,
+                "mean_logit_neg": mean_logit_neg
+            }
+            
+        return total_loss
+

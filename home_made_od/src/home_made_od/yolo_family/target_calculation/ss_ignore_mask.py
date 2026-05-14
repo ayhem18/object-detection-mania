@@ -2,7 +2,7 @@ import torch
 from typing import List, Tuple
 
 
-class SingScaleIgnoreTargetCalculator:
+class SingleScaleIgnoreTargetCalculator:
     def __init__(self, 
                     num_classes: int, 
                     anchors: List[Tuple[float, float]], 
@@ -51,8 +51,8 @@ class SingScaleIgnoreTargetCalculator:
         """
         Calculates the target tensor for the YOLOv2 model. How exactly ?
 
-        This function expects the targets to be in the following shape: [B, 6] -> [image_index, class_index, x_center, y_center, width, height]
-        with x_center and y_center in the range [0, 1] and width and height in the range [0, 1].
+        This function expects the targets to be in the following shape: [B, 6] -> [image_index, class_index, x_center, y_center, y_dim, x_dim]
+        with x_center and y_center in the range [0, 1] and y_dim and x_dim in the range [0, 1].
 
         The output of this function is a target tensor of the shape [B, H, W, num_anchors * (5 + num_classes)] and an ignore mask of the shape [B, H, W, num_anchors]     
 
@@ -74,7 +74,7 @@ class SingScaleIgnoreTargetCalculator:
         target_tensor = torch.zeros((batch_size, self.num_anchors, self.num_channels_per_anchor, H, W), device=device)
         
         if targets.shape[0] == 0:
-            return target_tensor.view(batch_size, -1, H, W)
+            return target_tensor.view(batch_size, -1, H, W), torch.zeros((batch_size, H, W, self.num_anchors), device=device)
 
         # 1. Target Indices
         batch_idx = targets[:, 0].long()
@@ -92,7 +92,7 @@ class SingScaleIgnoreTargetCalculator:
 
         # 3. Compute tw and th
         # 3.a Compute the best anchor for the ground truth box
-        gt_wh = targets[:, 4:6]
+        gt_wh = targets[:, 4:6] # [B, 2]
         anchors = self.anchors.to(device)
         
         # compute the IoU between each ground truth box and each anchor if they have the same center
@@ -124,20 +124,27 @@ class SingScaleIgnoreTargetCalculator:
         # but have a iou with a ground truth bbox that is greater than the iou_threshold_ignore_anchor
 
         true_best_anchor_indices = best_anchor_indices.unsqueeze(1) == torch.arange(self.num_anchors, device=device).unsqueeze(0)
-        gt_anchors_ignore = ious > self.iou_threshold_ignore_anchor & ~ true_best_anchor_indices
+        gt_anchors_ignore = (ious > self.iou_threshold_ignore_anchor) & (~true_best_anchor_indices)
         
         # gt_anchors_ignore is a (GT * num_anchors) matrix 
         # we need to convert this matrix into a (batch_size, H, W, num_anchors)
-        # the non-vectorized solution would be to first create a (batch_size, H, W, num_anchors) tensor of zeros
-        ignore_mask = torch.zeros((batch_size, H, W, self.num_anchors), device=device)
-
-        # for each gt find its h and w coordinates and then set the ignore_mask[batch_index, h, w, :] to the gt_anchors_ignore[gt_index, :]
-        # the assignment below is quite tricky: 
-        # batch_idx: [T,] (where T is the number of ground truth boxes)
-        # grid_y_floor: [T,]
-        # grid_x_floor: [T,]
-        ignore_mask[batch_idx, grid_y_floor, grid_x_floor, :] = gt_anchors_ignore
+        # To handle multiple ground truth boxes falling into the same grid cell properly,
+        # we can use scatter_add_ to aggregate the booleans efficiently without overwriting.
+        
+        # TODO: understand exactly how this works and why it is the best way to do it
+        ignore_mask_flat = torch.zeros((batch_size * H * W, self.num_anchors), dtype=torch.float32, device=device)
+        flat_indices = batch_idx * (H * W) + grid_y_floor * W + grid_x_floor
+        
+        # Add the ignore flags together for duplicate cells
+        ignore_mask_flat.scatter_add_(
+            0, 
+            flat_indices.unsqueeze(1).expand(-1, self.num_anchors), 
+            gt_anchors_ignore.float()
+        )
+        
+        # Reshape back and convert to boolean
+        ignore_mask = (ignore_mask_flat > 0).view(batch_size, H, W, self.num_anchors)        
         return target_tensor_final, ignore_mask
 
-    def __call__(self, targets: torch.Tensor, batch_size: int) -> torch.Tensor:
+    def __call__(self, targets: torch.Tensor, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.compute_targets(targets, batch_size)

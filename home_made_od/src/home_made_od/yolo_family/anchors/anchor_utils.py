@@ -70,6 +70,7 @@ def generate_anchors(wh_list: List[Tuple[float, float]], num_anchors: int, max_i
         wh_list: List of (w, h) tuples representing dataset bounding boxes.
         num_anchors: Number of anchor boxes to generate (K).
         max_iters: Maximum iterations for KMeans convergence.
+        seed: Random seed for initialization.
         
     Returns:
         (num_anchors, 2) numpy array of anchor (w, h) sorted by area.

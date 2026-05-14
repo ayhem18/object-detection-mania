@@ -3,11 +3,12 @@ import json
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 
 from mypt.loggers.base import BaseLogger
 from home_made_od.general.early_stopping import EarlyStopping
-from home_made_od.yolo_family.losses.yolov2_loss import YoloV2Loss
+from home_made_od.yolo_family.losses.yolov2_loss import SSIgnoreMaskYoloV2Loss, YoloV2Loss
+from home_made_od.yolo_family.target_calculation.ss_ignore_mask import SingleScaleIgnoreTargetCalculator
 from home_made_od.yolo_family.target_calculation.single_scale_no_ignore import SingleScaleNoIgnoreTargetCalculator
 
 # =========================================================================================
@@ -21,6 +22,9 @@ def _init_epoch_metrics() -> Dict[str, Any]:
         "loss_reg": 0.0,
         "loss_cls": 0.0,
         "num_objects": 0.0,
+        "num_ignored": 0.0,
+        "mean_logit_pos": 0.0,
+        "mean_logit_neg": 0.0,
         "total_samples": 0,
         "top_k_samples": [] # List of (loss, img, pred, target)
     }
@@ -37,6 +41,9 @@ def _update_epoch_metrics(epoch_metrics: Dict[str, Any], batch_metrics: Dict[str
     epoch_metrics["loss_reg"] += batch_metrics["loss_reg"]
     epoch_metrics["loss_cls"] += batch_metrics["loss_cls"]
     epoch_metrics["num_objects"] += batch_metrics["num_objects"]
+    epoch_metrics["num_ignored"] += batch_metrics.get("num_ignored", 0.0)
+    epoch_metrics["mean_logit_pos"] += batch_metrics.get("mean_logit_pos", 0.0)
+    epoch_metrics["mean_logit_neg"] += batch_metrics.get("mean_logit_neg", 0.0)
     epoch_metrics["total_samples"] += batch_metrics["batch_size"]
     
     if "top_samples" in batch_metrics:
@@ -52,6 +59,9 @@ def _finalize_epoch_metrics(epoch_metrics: Dict[str, Any], num_batches: int) -> 
         "loss_reg": epoch_metrics["loss_reg"] / num_batches,
         "loss_cls": epoch_metrics["loss_cls"] / num_batches,
         "avg_objects_per_batch": epoch_metrics["num_objects"] / num_batches,
+        "avg_ignored_per_batch": epoch_metrics["num_ignored"] / num_batches,
+        "mean_logit_pos": epoch_metrics["mean_logit_pos"] / num_batches,
+        "mean_logit_neg": epoch_metrics["mean_logit_neg"] / num_batches,
         "total_samples": epoch_metrics["total_samples"],
         "top_samples": epoch_metrics["top_k_samples"]
     }
@@ -59,8 +69,8 @@ def _finalize_epoch_metrics(epoch_metrics: Dict[str, Any], num_batches: int) -> 
 def _single_iteration(model: nn.Module, 
                       inputs: torch.Tensor, 
                       raw_targets: torch.Tensor, 
-                      target_calculator: SingleScaleNoIgnoreTargetCalculator,
-                      criterion: YoloV2Loss, 
+                      target_calculator: Union[SingleScaleNoIgnoreTargetCalculator, SingleScaleIgnoreTargetCalculator],
+                      criterion: Union[YoloV2Loss, SSIgnoreMaskYoloV2Loss], 
                       device: torch.device,
                       track_top_samples: bool = True) -> Dict[str, Any]:
     """
@@ -89,6 +99,13 @@ def _single_iteration(model: nn.Module,
         "num_objects": loss_dict["num_objects"].item(),
         "batch_size": batch_size
     }
+    
+    if "num_ignored" in loss_dict:
+        res["num_ignored"] = loss_dict["num_ignored"].item()
+    if "mean_logit_pos" in loss_dict:
+        res["mean_logit_pos"] = loss_dict["mean_logit_pos"].item()
+    if "mean_logit_neg" in loss_dict:
+        res["mean_logit_neg"] = loss_dict["mean_logit_neg"].item()
     
     # 4. Diagnostics: Track top-loss samples
     if track_top_samples:
@@ -207,8 +224,8 @@ def run_training_loop(model: nn.Module,
                       train_loader: torch.utils.data.DataLoader, 
                       val_loader: torch.utils.data.DataLoader, 
                       optimizer: torch.optim.Optimizer, 
-                      target_calculator: SingleScaleNoIgnoreTargetCalculator,
-                      criterion: YoloV2Loss,
+                      target_calculator: Union[SingleScaleNoIgnoreTargetCalculator, SingleScaleIgnoreTargetCalculator],
+                      criterion: Union[YoloV2Loss, SSIgnoreMaskYoloV2Loss],
                       device: torch.device,
                       epochs: int,
                       artifact_dir: str,
@@ -244,6 +261,7 @@ def run_training_loop(model: nn.Module,
 
             # Logging
             _log_metrics_to_json(train_res, val_res, epoch, artifact_dir)
+
             if logger:
                 log_dict = {f"train_{k}": v for k, v in train_res.items() if isinstance(v, (float, int))}
                 log_dict.update({f"val_{k}": v for k, v in val_res.items() if isinstance(v, (float, int))})
@@ -251,8 +269,15 @@ def run_training_loop(model: nn.Module,
 
             # Print
             print(f"\nEpoch [{epoch+1:03d}/{epochs:03d}]")
-            print(f"  Train | Loss: {train_res['epoch_loss']:.5f} (Obj: {train_res['loss_obj']:.5f}, Reg: {train_res['loss_reg']:.5f}, Cls: {train_res['loss_cls']:.5f})")
-            print(f"  Val   | Loss: {val_res['epoch_loss']:.5f} (Obj: {val_res['loss_obj']:.5f}, Reg: {val_res['loss_reg']:.5f}, Cls: {val_res['loss_cls']:.5f})")
+            train_str = f"  Train | Loss: {train_res['epoch_loss']:.5f} (Obj: {train_res['loss_obj']:.5f}, Reg: {train_res['loss_reg']:.5f}, Cls: {train_res['loss_cls']:.5f})"
+            if 'avg_ignored_per_batch' in train_res and train_res['avg_ignored_per_batch'] > 0:
+                train_str += f" | Ignored: {train_res['avg_ignored_per_batch']:.1f}, LPos: {train_res['mean_logit_pos']:.2f}, LNeg: {train_res['mean_logit_neg']:.2f}"
+            print(train_str)
+            
+            val_str = f"  Val   | Loss: {val_res['epoch_loss']:.5f} (Obj: {val_res['loss_obj']:.5f}, Reg: {val_res['loss_reg']:.5f}, Cls: {val_res['loss_cls']:.5f})"
+            if 'avg_ignored_per_batch' in val_res and val_res['avg_ignored_per_batch'] > 0:
+                val_str += f" | Ignored: {val_res['avg_ignored_per_batch']:.1f}, LPos: {val_res['mean_logit_pos']:.2f}, LNeg: {val_res['mean_logit_neg']:.2f}"
+            print(val_str)
 
             if early_stopping.check_early_stop(model, val_res['epoch_loss']):
                 print("Early stopping triggered.")
