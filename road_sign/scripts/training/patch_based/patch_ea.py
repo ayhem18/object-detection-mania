@@ -25,7 +25,7 @@ road_sign_root = os.path.join(workspace_root, 'road_sign')
 sys.path.insert(0, workspace_root)
 sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_based'))
 
-from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
+from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
 from home_made_od.yolo_v2.modules.yolov2_diagnosis import analyze_gt_matches, DiagnosisDataset, plot_diagnostic_results
 from home_made_od.od_metrics import evaluate_model
 from road_sign.utils.data_utils import YoloFormatDataset, yolov2_collate_fn

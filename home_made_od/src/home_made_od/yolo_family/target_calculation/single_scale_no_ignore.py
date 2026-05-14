@@ -1,7 +1,7 @@
 import torch
 from typing import List, Tuple
 
-class YoloV2TargetCalculator:
+class SingleScaleNoIgnoreTargetCalculator:
     def __init__(self, num_classes: int, anchors: List[Tuple[float, float]], feature_map_shape: Tuple[int, int]):
         """This class is used to calculate the targets for the YOLOv2 model.
 
@@ -41,7 +41,25 @@ class YoloV2TargetCalculator:
         return inter / (union + 1e-7)
 
     def compute_targets(self, targets: torch.Tensor, batch_size: int) -> torch.Tensor:
-        """Calculates the target tensor for the YOLOv2 model."""
+        """
+        Calculates the target tensor for the YOLOv2 model. How exactly ?
+
+        This function expects the targets to be in the following shape: [B, 6] -> [image_index, class_index, x_center, y_center, width, height]
+        with x_center and y_center in the range [0, 1] and width and height in the range [0, 1].
+
+        The output of this function is a target tensor of the shape [B, H, W, num_anchors * (5 + num_classes)]        
+
+        # H: height of the feature map
+        # W: width of the feature map
+        # 5: tx, ty, th, tw, obj 
+        # tx: represents the relative distance between the center of the anchor box and the feature map top left x-coordinate
+        # ty: represents the relative distance between the center of the anchor box and the feature map top left y-coordinate
+        # th: log(height / anchor_height)
+        # tw: log(width / anchor_width)
+        # obj: 1 if the anchor box contains an object, 0 otherwise
+        
+
+        """
         H, W = self.feature_map_shape
         device = targets.device
         
@@ -54,33 +72,40 @@ class YoloV2TargetCalculator:
         # 1. Target Indices
         batch_idx = targets[:, 0].long()
         cls_id = targets[:, 1].long()
-        
-        grid_x = targets[:, 2] * W
-        grid_y = targets[:, 3] * H
+
+        # 2. Compute tx and ty        
+        grid_x = targets[:, 2] * W # [0, 1] -> [0, W]
+        grid_y = targets[:, 3] * H # [0, 1] -> [0, H]
         
         j = torch.floor(grid_x).long().clamp(0, W - 1)
         i = torch.floor(grid_y).long().clamp(0, H - 1)
-        
-        # 2. Anchor Matching
+
+        tx = grid_x - j
+        ty = grid_y - i
+
+        # 3. Compute tw and th
+        # 3.a Compute the best anchor for the ground truth box
         gt_wh = targets[:, 4:6]
         anchors = self.anchors.to(device)
         
+        # compute the IoU between each ground truth box and each anchor if they have the same center
+        # why is this enough: because for each cell we have anchors that all have the same center (the center of the cell)
+        # and a gt bbox will be compared against anchors whose centers share the same grid cell
+        # so gt  bbox -> cell -> candidate anchors
+        # best anchor for this bbox -> anchor with the closest aspect ratio (since the center of the bbox is almost the same as the center of the cell which the same as the center of the anchor )
         ious = self._wh_iou(gt_wh, anchors)
         best_anchor_indices = torch.argmax(ious, dim=1)
 
-        # 3. Fill Target Tensor
-        tx = grid_x - j
-        ty = grid_y - i
         
         matched_anchors = anchors[best_anchor_indices]
-        tw = torch.log(targets[:, 4] / (matched_anchors[:, 0] + 1e-7) + 1e-7)
-        th = torch.log(targets[:, 5] / (matched_anchors[:, 1] + 1e-7) + 1e-7)
+        th = torch.log(targets[:, 4] / (matched_anchors[:, 0] + 1e-7) + 1e-7)
+        tw = torch.log(targets[:, 5] / (matched_anchors[:, 1] + 1e-7) + 1e-7)
         
         # Vectorized Population
         target_tensor[batch_idx, best_anchor_indices, 0, i, j] = tx
         target_tensor[batch_idx, best_anchor_indices, 1, i, j] = ty
-        target_tensor[batch_idx, best_anchor_indices, 2, i, j] = tw
-        target_tensor[batch_idx, best_anchor_indices, 3, i, j] = th
+        target_tensor[batch_idx, best_anchor_indices, 2, i, j] = th
+        target_tensor[batch_idx, best_anchor_indices, 3, i, j] = tw
         target_tensor[batch_idx, best_anchor_indices, 4, i, j] = 1.0 # Objectness
         
         # Vectorized Classification Target
@@ -90,3 +115,5 @@ class YoloV2TargetCalculator:
 
     def __call__(self, targets: torch.Tensor, batch_size: int) -> torch.Tensor:
         return self.compute_targets(targets, batch_size)
+
+

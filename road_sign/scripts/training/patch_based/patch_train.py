@@ -24,9 +24,9 @@ road_sign_root = os.path.join(workspace_root, 'road_sign')
 
 sys.path.insert(0, workspace_root)
 
-from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
-from home_made_od.yolo_v2.modules.yolov2_loss import YoloV2Loss
-from home_made_od.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
+from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
+from home_made_od.yolo_family.losses.yolov2_loss import YoloV2Loss
+from home_made_od.yolo_family.target_calculation.single_scale_no_ignore import YoloV2TargetCalculator
 from home_made_od.yolo_v2.modules.yolov2_train import run_training_loop
 from road_sign.utils.data_utils import YoloFormatDataset, yolov2_collate_fn
 

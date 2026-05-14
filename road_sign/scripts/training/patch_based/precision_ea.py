@@ -30,7 +30,7 @@ sys.path.insert(0, workspace_root)
 sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_based'))
 sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_based', 'patch_inference'))
 
-from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
+from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
 from basic_inference import build_inference_model, PatchInferenceDataset, patch_collate_fn
 from mypt.code_utils.pytorch_utils import seed_everything
 

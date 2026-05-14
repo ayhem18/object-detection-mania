@@ -28,7 +28,7 @@ from prepare_patches import (
     generate_negative_patches, 
     update_labels_for_patch
 )
-from home_made_od.yolo_v2.modules.anchors.anchor_utils import generate_anchors
+from home_made_od.yolo_family.anchors.anchor_utils import generate_anchors
 
 DEFAULT_CONFIG = {
     "scales": [512, 1024, 2048],

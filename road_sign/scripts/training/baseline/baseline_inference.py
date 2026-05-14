@@ -24,8 +24,8 @@ workspace_root = current_dir
 road_sign_root = os.path.join(workspace_root, 'road_sign')
 sys.path.insert(0, workspace_root)
 
-from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
-from home_made_od.yolo_v2.modules.anchors.anchor_utils import generate_anchors
+from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
+from home_made_od.yolo_family.anchors.anchor_utils import generate_anchors
 from mypt.backbones.resnetFE import ResnetFE
 from mypt.code_utils.pytorch_utils import seed_everything
 

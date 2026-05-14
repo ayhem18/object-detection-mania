@@ -25,11 +25,11 @@ road_sign_root = os.path.join(workspace_root, 'road_sign')
 # Add the workspace root to sys.path so 'road_sign' can be imported
 sys.path.insert(0, workspace_root)
 
-from home_made_od.yolo_v2.modules.yolov2_model import YoloV2
-from home_made_od.yolo_v2.modules.yolov2_loss import YoloV2Loss
-from home_made_od.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
+from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
+from home_made_od.yolo_family.losses.yolov2_loss import YoloV2Loss
+from home_made_od.yolo_family.target_calculation.single_scale_no_ignore import YoloV2TargetCalculator
 from home_made_od.yolo_v2.modules.yolov2_train import run_training_loop
-from home_made_od.yolo_v2.modules.anchors.anchor_utils import generate_anchors
+from home_made_od.yolo_family.anchors.anchor_utils import generate_anchors
 from road_sign.utils.data_utils import YoloFormatDataset, yolov2_collate_fn
 
 from mypt.backbones.resnetFE import ResnetFE

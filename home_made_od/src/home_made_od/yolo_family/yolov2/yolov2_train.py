@@ -7,8 +7,8 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from mypt.loggers.base import BaseLogger
 from home_made_od.general.early_stopping import EarlyStopping
-from home_made_od.yolo_v2.modules.yolov2_loss import YoloV2Loss
-from home_made_od.yolo_v2.modules.target_calculation import YoloV2TargetCalculator
+from home_made_od.yolo_family.losses.yolov2_loss import YoloV2Loss
+from home_made_od.yolo_family.target_calculation.single_scale_no_ignore import SingleScaleNoIgnoreTargetCalculator
 
 # =========================================================================================
 # YOLOv2 Training Utilities
@@ -59,7 +59,7 @@ def _finalize_epoch_metrics(epoch_metrics: Dict[str, Any], num_batches: int) -> 
 def _single_iteration(model: nn.Module, 
                       inputs: torch.Tensor, 
                       raw_targets: torch.Tensor, 
-                      target_calculator: YoloV2TargetCalculator,
+                      target_calculator: SingleScaleNoIgnoreTargetCalculator,
                       criterion: YoloV2Loss, 
                       device: torch.device,
                       track_top_samples: bool = True) -> Dict[str, Any]:
@@ -111,7 +111,7 @@ def _single_iteration(model: nn.Module,
 def train_single_epoch(model: nn.Module, 
                        dataloader: torch.utils.data.DataLoader, 
                        optimizer: torch.optim.Optimizer, 
-                       target_calculator: YoloV2TargetCalculator,
+                       target_calculator: SingleScaleNoIgnoreTargetCalculator,
                        criterion: YoloV2Loss,
                        device: torch.device,
                        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
@@ -142,7 +142,7 @@ def train_single_epoch(model: nn.Module,
 
 def eval_single_epoch(model: nn.Module, 
                       dataloader: torch.utils.data.DataLoader, 
-                      target_calculator: YoloV2TargetCalculator,
+                      target_calculator: SingleScaleNoIgnoreTargetCalculator,
                       criterion: YoloV2Loss,
                       device: torch.device,
                       k_samples: int = 5) -> Dict[str, Any]:
@@ -207,7 +207,7 @@ def run_training_loop(model: nn.Module,
                       train_loader: torch.utils.data.DataLoader, 
                       val_loader: torch.utils.data.DataLoader, 
                       optimizer: torch.optim.Optimizer, 
-                      target_calculator: YoloV2TargetCalculator,
+                      target_calculator: SingleScaleNoIgnoreTargetCalculator,
                       criterion: YoloV2Loss,
                       device: torch.device,
                       epochs: int,
