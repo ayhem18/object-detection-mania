@@ -17,3 +17,5 @@ src/object_detection_mania/artifacts/yolo_v2_artifacts/synthetic/configs
 # the road sign competition dataset
 road_sign/data/*
 road_sign/artifacts/*
+
+road_sign/*data*/
