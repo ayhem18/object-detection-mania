@@ -11,11 +11,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import torch
 
-from dl_lib.etalon_object_detection.modules.anchors.anchor_eval_utils import (
+from home_made_od.anchors.anchor_eval_utils import (
     FlatCandidateBatch,
     reference_tensors_for_grid,
 )
-from dl_lib.etalon_object_detection.modules.od_metrics.grid_metrics import (
+from home_made_od.od_metrics.grid_metrics import (
     BBoxGridMetrics,
     Grid,
     ReferenceCellAssignment,

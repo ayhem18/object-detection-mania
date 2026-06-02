@@ -68,20 +68,13 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 
-from dl_lib.etalon_object_detection.modules.od_metrics.core_metrics import (
+from home_made_od.od_metrics.core_metrics import (
     PerGtAnchorStats,
     PerGtPredStats,
     flatten_per_image_records,
     per_gt_anchor_objectness_records,
     per_gt_best_pred_stats,
 )
-
-# from dl_lib.etalon_object_detection.modules.od_metrics.grid_metrics import (
-#     MIN_CELL_AXIS_COVERAGE_FRAC,
-#     PerGtGridStats,
-#     aggregate_grid_stats,
-#     per_gt_grid_stats,
-# )
 
 
 # ---------------------------------------------------------------------------

@@ -20,8 +20,12 @@ Road-sign layout (single source of truth)::
         patch_based/{dataset_hash}/
             ...
 
+    road_sign/artifacts/{model_name}/anchor_configs/{config_hash}.json
+        (registered clustering recipes: method + method_parameters)
+
     road_sign/artifacts/{model_name}/{dataset_type}/{dataset_hash}/{split_hash}/
-        anchors/anchors.json
+        anchors/anchors.json          (YOLO KMeans)
+        anchors/anchor_config.json    (RetinaNet per-split optimized anchors)
         {experiment_hash}/
             experiment_config.json
             checkpoints/
@@ -54,6 +58,7 @@ DATASET_CONFIG_FILENAME = "dataset_config.json"
 PATCH_CONFIG_FILENAME = "patch_config.yaml"
 CLASS_MAPPING_FILENAME = "class_mapping.json"
 ANCHORS_FILENAME = "anchors.json"
+RETINANET_ANCHOR_CONFIG_FILENAME = "anchor_config.json"
 SPLIT_CONFIG_FILENAME = "split_config.json"
 TRAIN_FILES_FILENAME = "train_files.json"
 VAL_FILES_FILENAME = "val_files.json"
@@ -102,6 +107,26 @@ def road_sign_data_root() -> Path:
 
 def road_sign_artifacts_root() -> Path:
     return road_sign_root() / "artifacts"
+
+
+REGISTERED_ANCHOR_CONFIGS_DIR_NAME = "anchor_configs"
+
+
+def registered_anchor_configs_root(model_name: str = "retinanet") -> Path:
+    """
+    Directory for registered anchor-clustering recipes (dataset-independent).
+
+    Each recipe is ``{config_hash}.json`` (method + validated method_parameters).
+    """
+    return road_sign_artifacts_root() / model_name / REGISTERED_ANCHOR_CONFIGS_DIR_NAME
+
+
+def registered_anchor_config_path(
+    config_hash: str,
+    model_name: str = "retinanet",
+) -> Path:
+    """Path to one registered recipe: ``artifacts/{model}/anchor_configs/{hash}.json``."""
+    return registered_anchor_configs_root(model_name) / f"{config_hash}.json"
 
 
 def legacy_flat_data_dir() -> Path:
@@ -216,7 +241,21 @@ def model_anchors_json_path(
     dataset_hash: str,
     split_hash: str,
 ) -> Path:
+    """YOLO KMeans anchor file (``anchors.json``)."""
     return model_anchors_dir(model_name, version, dataset_hash, split_hash) / ANCHORS_FILENAME
+
+
+def model_retinanet_anchor_config_path(
+    model_name: str,
+    version: RoadSignDatasetVersion,
+    dataset_hash: str,
+    split_hash: str,
+) -> Path:
+    """RetinaNet per-FPN-level anchor config (``anchor_config.json``)."""
+    return (
+        model_anchors_dir(model_name, version, dataset_hash, split_hash)
+        / RETINANET_ANCHOR_CONFIG_FILENAME
+    )
 
 
 def model_experiment_dir(

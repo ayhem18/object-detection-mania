@@ -7,7 +7,7 @@ Methods (see ``compute_optimized_anchors``):
   cluster K1 base sizes (sqrt area) and K2 aspect ratios (h/w) independently per level.
 - ``default`` — fixed multi-level anchor preset (no dataset clustering).
 
-This module performs in-memory computation only. RetinaNet manifest assembly and
+This module performs in-memory clustering only. RetinaNet FPN finalization and
 persistence live in ``retinanet_anchors``.
 """
 
@@ -16,18 +16,18 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from tqdm import tqdm
 
 from mypt.code_utils.pytorch_utils import seed_everything
 
-# from dl_lib.etalon_object_detection.modules.ds_utils import WeldingDetectionDataset
-
 ASSIGNMENT_METHODS = ("area_based", "dimension_based", "default")
+
+# Each entry is ``(y_dim, x_dim)`` in the same coordinate space as training (e.g. resized input).
+BoxDimensions = Tuple[float, float]
+LevelBoxMap = Dict[str, List[BoxDimensions]]
 
 # Canonical FPN level order (generic; not detector-specific).
 FPN_LEVEL_ORDER: Tuple[str, ...] = ("P2", "P3", "P4", "P5", "P6", "P7")
@@ -68,21 +68,19 @@ METHOD_REQUIRED_PARAMETERS: Dict[str, Tuple[str, ...]] = {
 
 @dataclass(frozen=True)
 class AnchorOptimizationResult:
-    """Raw anchor clustering output before detector-specific manifest finalization."""
+    """Per-FPN-level anchor clustering output (in-memory, before RetinaNet finalization)."""
 
     method: str
     method_parameters: Dict[str, Any]
     config_hash: str
-    dataset_hash: str
-    img_size: Tuple[int, int]
     fpn_specs: List[Dict[str, Any]]
     fpn_coefficient: int
     used_fpn_levels: List[str]
     level_aspect_ratios: Dict[str, List[float]]
     level_base_sizes: Dict[str, List[float]]
-    enriched_samples: List[Dict[str, Any]]
     seed: int
     scales: List[float]
+    box_count: int
 
 
 def validate_method_parameters(method: str, method_parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -330,75 +328,42 @@ def compute_anchor_config_hash(
     return hashlib.md5(canonical.encode("utf-8")).hexdigest()
 
 
-def anchor_config_output_dir(
-    dataset_hash: str,
-    split_hash: str,
-    config_hash: str,
-) -> Path:
-    """``artifacts/{dataset_hash}/{split_hash}/{config_hash}/anchors_data/``."""
-    from dl_lib.etalon_object_detection.modules.path_layout import anchors_data_dir
+def group_box_dimensions_by_fpn_level(
+    box_dimensions: Sequence[BoxDimensions],
+    *,
+    method: str,
+    fpn_coefficient: int,
+    fallback_level: str = "P3",
+) -> LevelBoxMap:
+    """
+    Assign each ``(y_dim, x_dim)`` GT box to an FPN level.
 
-    return anchors_data_dir(dataset_hash, split_hash, config_hash)
+    Parameters
+    ----------
+    box_dimensions :
+        Box heights and widths in training input space (y first, x second).
+    method :
+        ``area_based`` | ``dimension_based`` (``default`` uses area-based assignment).
+    """
+    fpn_specs = calculate_fpn_specs(fpn_coefficient)
+    level_boxes: LevelBoxMap = {spec["level"]: [] for spec in fpn_specs}
 
+    if method == "dimension_based":
+        assign = lambda dims: assign_to_level_by_dimension(
+            dims, fpn_specs, fpn_coefficient, fallback_level=fallback_level
+        )
+    else:
+        assign = lambda dims: assign_to_level_by_area(dims, fpn_specs, fpn_coefficient)
 
-def _collect_enriched_samples(
-    dataset: WeldingDetectionDataset,
-    fpn_specs: List[Dict[str, Any]],
-    assign_fn: Callable[[Tuple[float, float]], Dict[str, Any]],
-) -> Tuple[List[Dict[str, Any]], Dict[str, List[Tuple[float, float]]]]:
-    """Load labels, assign each GT box, return enriched samples and per-level (y, x) lists."""
-    target_y_dim, target_x_dim = dataset.target_size
-    level_etalons: Dict[str, List[Tuple[float, float]]] = {s["level"]: [] for s in fpn_specs}
-    enriched_samples: List[Dict[str, Any]] = []
+    for dims in box_dimensions:
+        assignment = assign(dims)
+        level_boxes[assignment["assigned_level"]].append(dims)
 
-    for sample in tqdm(dataset.samples, desc="Analyzing Etalons"):
-        lbl_path = dataset.cache_dir / sample["lbl_path"]
-        if not lbl_path.exists():
-            continue
-
-        with open(lbl_path, "r", encoding="utf-8") as f:
-            lbl_data = json.load(f)
-
-        orig_x = lbl_data["image_x_dim"]
-        orig_y = lbl_data["image_y_dim"]
-        scale_x = target_x_dim / orig_x
-        scale_y = target_y_dim / orig_y
-
-        enriched_boxes = []
-        for box in lbl_data["boxes"]:
-            x1, y1, x2, y2 = box
-            x1_scaled, x2_scaled = x1 * scale_x, x2 * scale_x
-            y1_scaled, y2_scaled = y1 * scale_y, y2 * scale_y
-            x_dim = x2_scaled - x1_scaled
-            y_dim = y2_scaled - y1_scaled
-
-            assignment = assign_fn((y_dim, x_dim))
-            level_etalons[assignment["assigned_level"]].append((y_dim, x_dim))
-
-            enriched_boxes.append(
-                {
-                    "coords": [x1_scaled, y1_scaled, x2_scaled, y2_scaled],
-                    "x_dim": x_dim,
-                    "y_dim": y_dim,
-                    "area": x_dim * y_dim,
-                    "assigned_level": assignment["assigned_level"],
-                    "assigned_base_size": assignment["assigned_base_size"],
-                    "max_visible_level": assignment["max_visible_level"],
-                    "min_dimension": assignment.get("min_dimension"),
-                    "assignment_threshold": assignment.get("assignment_threshold"),
-                    "assignment_method": assignment.get("assignment_method"),
-                }
-            )
-
-        s_copy = sample.copy()
-        s_copy["enriched_etalons"] = enriched_boxes
-        enriched_samples.append(s_copy)
-
-    return enriched_samples, level_etalons
+    return level_boxes
 
 
 def _optimize_level_clusters_area_based(
-    level_etalons: Dict[str, List[Tuple[float, float]]],
+    level_etalons: LevelBoxMap,
     fpn_specs: List[Dict[str, Any]],
     params: Dict[str, Any],
 ) -> Tuple[List[str], Dict[str, List[float]], Dict[str, List[float]]]:
@@ -434,7 +399,7 @@ def _optimize_level_clusters_area_based(
 
 
 def _optimize_level_clusters_dimension_based(
-    level_etalons: Dict[str, List[Tuple[float, float]]],
+    level_etalons: LevelBoxMap,
     params: Dict[str, Any],
 ) -> Tuple[List[str], Dict[str, List[float]], Dict[str, List[float]]]:
     """K1 base sizes (sqrt area) and K2 aspect ratios (h/w) clustered independently per level."""
@@ -498,76 +463,68 @@ def _build_torchvision_default_anchors() -> Tuple[List[str], Dict[str, List[floa
 
 
 def compute_optimized_anchors(
-    dataset: WeldingDetectionDataset,
-    dataset_hash: str,
+    box_dimensions: Sequence[BoxDimensions],
+    *,
     method: str,
     method_parameters: Dict[str, Any],
 ) -> AnchorOptimizationResult:
     """
-    Run anchor assignment and per-level clustering; return an in-memory result.
+    Run FPN level assignment and per-level clustering from GT box dimensions only.
 
-    Parameters
-    ----------
-    method :
-        ``area_based`` | ``dimension_based`` | ``default``
-    method_parameters :
-        Required keys per ``METHOD_REQUIRED_PARAMETERS[method]``.
+    Box sizes must already be in the coordinate space used for training (e.g. resized
+    pixel heights/widths). Image resolution is not part of anchor optimization.
     """
     params = validate_method_parameters(method, method_parameters)
     seed_everything(params["seed"])
 
+    dims = list(box_dimensions)
     config_hash = compute_anchor_config_hash(method, method_parameters)
     logger.info(
-        "Computing anchors: %d samples, method=%s, config_hash=%s",
-        len(dataset),
+        "Computing anchors: %d boxes, method=%s, config_hash=%s",
+        len(dims),
         method,
         config_hash,
     )
 
-    target_y_dim, target_x_dim = dataset.target_size
     fpn_coefficient = params["fpn_coefficient"]
     fpn_specs = calculate_fpn_specs(fpn_coefficient)
     scales = list(params.get("scales", [1.0]))
 
-    if method == "area_based":
-        assign_fn = lambda dims: assign_to_level_by_area(dims, fpn_specs, fpn_coefficient)
-    elif method == "dimension_based":
-        fallback = params["fallback_level"]
-        assign_fn = lambda dims: assign_to_level_by_dimension(
-            dims, fpn_specs, fpn_coefficient, fallback_level=fallback
-        )
-    else:
-        assign_fn = lambda dims: assign_to_level_by_area(dims, fpn_specs, fpn_coefficient)
-
-    enriched_samples, level_etalons = _collect_enriched_samples(
-        dataset, fpn_specs, assign_fn
-    )
-
-    if method == "area_based":
-        used_fpn_levels, level_aspect_ratios, level_base_sizes = (
-            _optimize_level_clusters_area_based(level_etalons, fpn_specs, params)
-        )
-    elif method == "dimension_based":
-        used_fpn_levels, level_aspect_ratios, level_base_sizes = (
-            _optimize_level_clusters_dimension_based(level_etalons, params)
-        )
-    else:
+    if method == "default":
         used_fpn_levels, level_aspect_ratios, level_base_sizes = (
             _build_torchvision_default_anchors()
         )
+    else:
+        if not dims:
+            raise ValueError(
+                "box_dimensions cannot be empty for area_based or dimension_based methods."
+            )
+        fallback = params.get("fallback_level", "P3")
+        level_etalons = group_box_dimensions_by_fpn_level(
+            dims,
+            method=method,
+            fpn_coefficient=fpn_coefficient,
+            fallback_level=fallback,
+        )
+        if method == "area_based":
+            used_fpn_levels, level_aspect_ratios, level_base_sizes = (
+                _optimize_level_clusters_area_based(level_etalons, fpn_specs, params)
+            )
+        else:
+            used_fpn_levels, level_aspect_ratios, level_base_sizes = (
+                _optimize_level_clusters_dimension_based(level_etalons, params)
+            )
 
     return AnchorOptimizationResult(
         method=method,
         method_parameters=params,
         config_hash=config_hash,
-        dataset_hash=dataset_hash,
-        img_size=(target_y_dim, target_x_dim),
         fpn_specs=fpn_specs,
         fpn_coefficient=fpn_coefficient,
         used_fpn_levels=used_fpn_levels,
         level_aspect_ratios=level_aspect_ratios,
         level_base_sizes=level_base_sizes,
-        enriched_samples=enriched_samples,
         seed=params["seed"],
         scales=scales,
+        box_count=len(dims),
     )

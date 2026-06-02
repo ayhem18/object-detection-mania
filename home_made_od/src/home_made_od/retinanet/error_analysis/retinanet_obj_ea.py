@@ -11,11 +11,11 @@ import torch
 import torch.nn as nn
 from torchvision.ops import box_iou
 
-from dl_lib.etalon_object_detection.modules.od_metrics.grid_metrics import (
+from home_made_od.od_metrics.grid_metrics import (
     Grid,
     ReferenceCellAssignment,
 )
-from dl_lib.etalon_object_detection.modules.retinanet.error_analysis.retinanet_grid_index import (
+from home_made_od.retinanet.error_analysis.retinanet_grid_index import (
     build_retinanet_grid_layout,
     level_ids_from_manifest,
     verify_anchor_cell_count,

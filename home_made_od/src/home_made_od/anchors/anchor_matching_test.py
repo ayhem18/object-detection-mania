@@ -13,7 +13,7 @@ import torch.nn as nn
 from torchvision.ops.boxes import box_iou
 from tqdm import tqdm
 
-from home_made_od.modules.anchors.anchor_eval_utils import (
+from home_made_od.anchors.anchor_eval_utils import (
     DEFAULT_FPN_LEVEL_IDS,
     FlatCandidateBatch,
 )

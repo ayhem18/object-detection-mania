@@ -1,11 +1,11 @@
-from dl_lib.etalon_object_detection.modules.retinanet.error_analysis.retinanet_grid_index import (
+from home_made_od.retinanet.error_analysis.retinanet_grid_index import (
     PriorCellAssignment,
     ReferenceCellAssignment,
     build_retinanet_grid_layout,
     level_ids_from_manifest,
     verify_anchor_cell_count,
 )
-from dl_lib.etalon_object_detection.modules.retinanet.error_analysis.retinanet_obj_ea import (
+from home_made_od.retinanet.error_analysis.retinanet_obj_ea import (
     RetinaNetLayerBBundle,
     anchor_scores_from_cls_logits,
     configure_retinanet_postprocess,

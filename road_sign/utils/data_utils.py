@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-import json
 import os
+import json
+import cv2
+import torch
+import numpy as np
+
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
-import cv2
-import numpy as np
-import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 from torchvision import tv_tensors
 from torchvision.transforms import v2
 
+from home_made_od.anchors.anchor_computation_strategies import BoxDimensions
 from home_made_od.general.path_utils import (
     DATASET_VERSION_PATCH,
     RoadSignDatasetVersion,
@@ -382,15 +384,6 @@ class RoadSignRetinaNetDataset(Dataset):
             "sample_id": self.sample_ids[idx],
         }
 
-        if len(box_tensor) > 0:
-            target["area"] = (box_tensor[:, 2] - box_tensor[:, 0]) * (
-                box_tensor[:, 3] - box_tensor[:, 1]
-            )
-            target["iscrowd"] = torch.zeros((len(label_tensor),), dtype=torch.int64)
-        else:
-            target["area"] = torch.zeros((0,), dtype=torch.float32)
-            target["iscrowd"] = torch.zeros((0,), dtype=torch.int64)
-
         img, target = self.transformations(img, target)
         return img, target
 
@@ -402,6 +395,38 @@ def retinanet_collate_fn(
     RetinaNet expects a list of images and a list of target dicts (not stacked tensors).
     """
     return tuple(zip(*batch))
+
+
+def collect_train_box_dimensions_for_anchors(
+    version: RoadSignDatasetVersion,
+    dataset_hash: str,
+    split_hash: str,
+    target_size: Tuple[int, int],
+) -> List[BoxDimensions]:
+    """
+    GT box ``(height, width)`` in training resize space, for RetinaNet anchor clustering.
+
+    Intended for the training script: uses train-split image/label pairs and the same
+    ``target_size`` as the RetinaNet dataset/dataloader.
+    """
+    train_ids, _, _ = load_split_lists(version, dataset_hash, split_hash)
+    pairs = get_train_image_label_pairs(version, dataset_hash, train_ids)
+    height, width = int(target_size[0]), int(target_size[1])
+    dimensions: List[BoxDimensions] = []
+
+    for _img_path, label_path in pairs:
+        label_file = Path(label_path)
+        if not label_file.is_file():
+            continue
+        with open(label_file, encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                bw = float(parts[3]) * width
+                bh = float(parts[4]) * height
+                dimensions.append((bh, bw))
+    return dimensions
 
 
 def build_retinanet_dataloaders(

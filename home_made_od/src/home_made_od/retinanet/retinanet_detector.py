@@ -1,5 +1,5 @@
 """
-Build dl-lab Etalon RetinaNet detectors (shared layout, two weight sources).
+Build torchvision RetinaNet detectors from an anchor config and optional checkpoint.
 
 FPN / backbone gotchas (torchvision + anchor manifest coupling)
 -----------------------------------------------------------------
@@ -67,7 +67,8 @@ from __future__ import annotations
 
 import logging
 from functools import partial
-from typing import List, Literal, Tuple, Union
+from pathlib import Path
+from typing import List, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -84,102 +85,66 @@ from home_made_od.retinanet.retinanet_anchors import (
     retinanet_returned_layers,
     validate_retinanet_fpn_levels,
 )
-# from dl_lib.etalon_object_detection.scripts.labeling.segmentation_model_predictions.seg_model import load_backbone_weights
 
 logger = logging.getLogger(__name__)
 
-WeightSource = Literal["segmentation", "trained_detector"]
+# ImageNet normalization (torchvision default for detection models).
+DEFAULT_IMAGE_MEAN: Tuple[float, float, float] = (0.485, 0.456, 0.406)
+DEFAULT_IMAGE_STD: Tuple[float, float, float] = (0.229, 0.224, 0.225)
 
-DL_LIB_ETALON_NUM_CLASSES = 2
-DL_LIB_ETALON_MEAN_VECTOR = [0.10013955, 0.10013955, 0.10013955]
-DL_LIB_ETALON_STD_VECTOR = [0.11381042, 0.11381042, 0.11381042]
-# All ResNet body blocks start trainable; use ``freeze_layers`` to restrict from the bottom.
 FULLY_TRAINABLE_BACKBONE_LAYERS = 5
 
 _OUT_CHANNELS = RESNET_OUT_CHANNELS
 _returned_layers = retinanet_returned_layers
 
 
+def _normalize_img_size(img_size: Union[int, Tuple[int, int]]) -> Tuple[int, int]:
+    if isinstance(img_size, int):
+        return (img_size, img_size)
+    if len(img_size) != 2:
+        raise ValueError(f"img_size must be (height, width), got {img_size!r}")
+    return int(img_size[0]), int(img_size[1])
+
+
 def _build_fpn_backbone(
     used_levels: List[str],
     trainable_backbone_layers: int,
-) -> tuple[nn.Module, nn.Module]:
-    """
-    Build ResNet50 body and FPN backbone for the requested manifest levels.
-
-    Parameters
-    ----------
-    used_levels :
-        FPN level names from the anchor manifest.
-    trainable_backbone_layers :
-        Count of unfrozen ResNet stages (0–5); see ``FULLY_TRAINABLE_BACKBONE_LAYERS``.
-
-    Returns
-    -------
-    tuple[nn.Module, nn.Module]
-        ``(body, fpn_backbone)`` where ``body`` is the raw ResNet50 used for
-        segmentation weight loading and ``fpn_backbone`` is the torchvision
-        ``BackboneWithFPN`` wrapper.
-
-    Notes
-    -----
-    **P6/P7 path.** When either level is requested, ``validate_retinanet_fpn_levels``
-    runs first, then ``LastLevelP6P7(_OUT_CHANNELS[4], 256)`` is attached.
-    ``_OUT_CHANNELS[4]`` is always 2048 (ResNet ``layer4``); do not derive this
-    from the last entry of :func:`_returned_layers` — see module docstring.
-
-    **No P6/P7 path.** ``extra_blocks`` is omitted, so torchvision inserts
-    ``LastLevelMaxPool`` and appends a ``"pool"`` map at 2× the finest stride.
-    Expect ``len(backbone(...)) > len(used_fpn_levels)`` in that case.
-
-    **Trainability vs freezing.** ``trainable_backbone_layers`` controls which
-    ResNet stages receive gradients at build time; :func:`_freeze_backbone_body`
-    may further freeze stages after weight loading.
-    """
+) -> nn.Module:
+    """ResNet50 + FPN for the FPN levels listed in the anchor config."""
     body = resnet50(weights=None)
-
     returned_layers = _returned_layers(used_levels)
     needs_p6p7 = "P6" in used_levels or "P7" in used_levels
 
     if needs_p6p7:
         validate_retinanet_fpn_levels(used_levels)
         extra_blocks = LastLevelP6P7(_OUT_CHANNELS[4], 256)
-        fpn = _resnet_fpn_extractor(
+        return _resnet_fpn_extractor(
             body,
             trainable_layers=trainable_backbone_layers,
             returned_layers=returned_layers,
             extra_blocks=extra_blocks,
         )
-        return body, fpn
 
-    fpn = _resnet_fpn_extractor(
+    return _resnet_fpn_extractor(
         body,
         trainable_layers=trainable_backbone_layers,
         returned_layers=returned_layers,
     )
-    return body, fpn
 
 
 def _assemble_retinanet(
     fpn_backbone: nn.Module,
     anchor_generator: AnchorGenerator,
     num_classes: int,
-    img_size: Union[int, Tuple[int, int]],
-    mean: List[float],
-    std: List[float],
+    img_size: Tuple[int, int],
+    mean: Sequence[float],
+    std: Sequence[float],
 ) -> RetinaNet:
     """
-    Wire FPN backbone, anchor generator, and detection head into a RetinaNet.
+    Wire FPN backbone, anchor generator, and detection head.
 
-    Notes
-    -----
-    **Head.** Uses ``GroupNorm(32)`` and GIoU box regression
-    (``head.regression_head._loss_type = "giou"``).
-
-    **Image size convention.** ``img_size`` is ``(height, width)`` everywhere
-    else in dl-lab (tensors shaped ``[C, H, W]``). Torchvision ``fixed_size``
-    expects ``(width, height)``, so the tuple is swapped here. ``_skip_resize=True``
-    assumes callers already feed images at the target resolution.
+    ``img_size`` is ``(height, width)``; torchvision ``fixed_size`` expects ``(width, height)``.
+    ``_skip_resize=True`` assumes callers already resize inputs to ``img_size``.
     """
     head = RetinaNetHead(
         in_channels=fpn_backbone.out_channels,
@@ -189,26 +154,21 @@ def _assemble_retinanet(
     )
     head.regression_head._loss_type = "giou"
 
-    flipped_transform_fixed_size = (img_size[1], img_size[0])
+    y_dim, x_dim = img_size
     return RetinaNet(
         fpn_backbone,
         num_classes,
         anchor_generator=anchor_generator,
         head=head,
-        image_mean=mean,
-        image_std=std,
-        fixed_size=flipped_transform_fixed_size,
+        image_mean=list(mean),
+        image_std=list(std),
+        fixed_size=(x_dim, y_dim),
         _skip_resize=True,
     )
 
 
 def _freeze_backbone_body(model: RetinaNet, freeze_layers: int) -> None:
-    """
-    Freeze the bottom ``freeze_layers`` ResNet body stages after weight loading.
-
-    ``freeze_layers=2`` freezes ``conv1``, ``bn1``, ``layer1``, and ``layer2``.
-    This is independent of ``trainable_backbone_layers`` passed at FPN build time.
-    """
+    """Freeze the bottom ``freeze_layers`` ResNet body stages (1 = layer1, …)."""
     if freeze_layers <= 0:
         return
     for param in model.backbone.body.conv1.parameters():
@@ -222,143 +182,61 @@ def _freeze_backbone_body(model: RetinaNet, freeze_layers: int) -> None:
                 param.requires_grad = False
 
 
-def build_dl_lab_etalon_retinanet(
+def build_retinanet(
     *,
     anchor_spec: AnchorTrainingSpec,
+    num_classes: int,
     img_size: Union[int, Tuple[int, int]],
     device: torch.device,
-    weights_path: str,
-    weight_source: WeightSource,
-    num_classes: int = DL_LIB_ETALON_NUM_CLASSES,
-    freeze_layers: int = 2,
-    mean: List[float] | None = None,
-    std: List[float] | None = None,
+    checkpoint_path: str | Path | None = None,
+    freeze_backbone_layers: int = 0,
+    trainable_backbone_layers: int = FULLY_TRAINABLE_BACKBONE_LAYERS,
+    mean: Sequence[float] | None = None,
+    std: Sequence[float] | None = None,
     anchor_generator: AnchorGenerator | None = None,
 ) -> RetinaNet:
     """
-    Build Etalon RetinaNet with optimized anchors.
+    Build RetinaNet with anchors from ``anchor_spec`` and optional weights.
 
     Parameters
     ----------
     anchor_spec :
-        Resolved anchor manifest (FPN levels, ``anchor_config.json`` path).
-    weights_path :
-        Checkpoint file path; meaning depends on ``weight_source``.
-    weight_source :
-        ``"segmentation"`` — load ResNet body weights from the segmentation model,
-        then train detection head + fine-tune FPN.
-
-        ``"trained_detector"`` — load a full RetinaNet ``state_dict`` from a
-        prior detection training run (same architecture / anchors).
-    anchor_generator :
-        Optional pre-built generator; if omitted, built from ``anchor_spec``.
-
-    Notes
-    -----
-    **Backbone vs manifest.** ``anchor_spec.used_fpn_levels`` drives
-    :func:`_build_fpn_backbone`. Implicit level coupling (P3→P2, P6/P7→P5,
-    extra ``pool`` map) is documented in the module docstring; align downstream
-    feature slicing with ``len(used_fpn_levels)``.
-
-    **Weight loading.**
-
-    - ``"segmentation"`` — only the ResNet ``body`` weights are loaded; FPN and
-      head start from scratch. ``freeze_layers`` then freezes the bottom stages.
-    - ``"trained_detector"`` — full ``state_dict``; architecture and anchors
-      must match the checkpoint exactly.
+        Resolved ``anchor_config.json`` (FPN levels + per-level sizes/ratios).
+    num_classes :
+        Foreground classes plus background (torchvision convention).
+    img_size :
+        Fixed input ``(height, width)`` for training/inference (independent of anchor clustering).
+    checkpoint_path :
+        If set, load a full detector ``state_dict`` (architecture must match anchors).
+    freeze_backbone_layers :
+        After build/load, freeze the bottom N ResNet stages in the backbone body.
     """
-    if weight_source not in ("segmentation", "trained_detector"):
-        raise ValueError(
-            f"weight_source must be 'segmentation' or 'trained_detector', got {weight_source!r}."
-        )
-
-    image_mean = mean if mean is not None else DL_LIB_ETALON_MEAN_VECTOR
-    image_std = std if std is not None else DL_LIB_ETALON_STD_VECTOR
+    image_mean = list(mean) if mean is not None else list(DEFAULT_IMAGE_MEAN)
+    image_std = list(std) if std is not None else list(DEFAULT_IMAGE_STD)
     used_levels = anchor_spec.used_fpn_levels
+    size_hw = _normalize_img_size(img_size)
 
     if anchor_generator is None:
         anchor_generator = build_anchor_generator_from_spec(anchor_spec)
-        logger.info("AnchorGenerator from manifest: %s", anchor_spec.manifest_path)
+        logger.info("AnchorGenerator from %s", anchor_spec.config_path)
     else:
         logger.info("Using provided AnchorGenerator")
 
-    body, fpn_backbone = _build_fpn_backbone(used_levels, FULLY_TRAINABLE_BACKBONE_LAYERS)
+    fpn_backbone = _build_fpn_backbone(used_levels, trainable_backbone_layers)
     model = _assemble_retinanet(
         fpn_backbone,
         anchor_generator,
         num_classes,
-        img_size,
+        size_hw,
         image_mean,
         image_std,
     )
 
-    if weight_source == "segmentation":
-        logger.info("Loading segmentation backbone weights: %s", weights_path)
-        load_backbone_weights(body, weights_path)
-        _freeze_backbone_body(model, freeze_layers)
-    else:
-        logger.info("Loading trained detector weights: %s", weights_path)
-        state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
+    if checkpoint_path is not None:
+        path = Path(checkpoint_path)
+        logger.info("Loading detector checkpoint: %s", path)
+        state_dict = torch.load(path, map_location="cpu", weights_only=True)
         model.load_state_dict(state_dict)
-        _freeze_backbone_body(model, freeze_layers)
 
+    _freeze_backbone_body(model, freeze_backbone_layers)
     return model.to(device)
-
-
-# ---------------------------------------------------------------------------
-# Convenience aliases (same interface, explicit weight source)
-# ---------------------------------------------------------------------------
-
-
-def build_dl_lab_etalon_retinanet_from_segmentation_weights(
-    *,
-    anchor_spec: AnchorTrainingSpec,
-    segmentation_weights_path: str,
-    img_size: Union[int, Tuple[int, int]],
-    device: torch.device,
-    num_classes: int = DL_LIB_ETALON_NUM_CLASSES,
-    freeze_layers: int = 2,
-    mean: List[float] | None = None,
-    std: List[float] | None = None,
-    anchor_generator: AnchorGenerator | None = None,
-) -> RetinaNet:
-    """Train / eval from scratch using segmentation-pretrained backbone."""
-    return build_dl_lab_etalon_retinanet(
-        anchor_spec=anchor_spec,
-        img_size=img_size,
-        device=device,
-        weights_path=segmentation_weights_path,
-        weight_source="segmentation",
-        num_classes=num_classes,
-        freeze_layers=freeze_layers,
-        mean=mean,
-        std=std,
-        anchor_generator=anchor_generator,
-    )
-
-
-def build_dl_lab_etalon_retinanet_from_trained_weights(
-    *,
-    anchor_spec: AnchorTrainingSpec,
-    trained_weights_path: str,
-    img_size: Union[int, Tuple[int, int]],
-    device: torch.device,
-    num_classes: int = DL_LIB_ETALON_NUM_CLASSES,
-    freeze_layers: int = 0,
-    mean: List[float] | None = None,
-    std: List[float] | None = None,
-    anchor_generator: AnchorGenerator | None = None,
-) -> RetinaNet:
-    """Resume or evaluate from a full detector checkpoint."""
-    return build_dl_lab_etalon_retinanet(
-        anchor_spec=anchor_spec,
-        img_size=img_size,
-        device=device,
-        weights_path=trained_weights_path,
-        weight_source="trained_detector",
-        num_classes=num_classes,
-        freeze_layers=freeze_layers,
-        mean=mean,
-        std=std,
-        anchor_generator=anchor_generator,
-    )

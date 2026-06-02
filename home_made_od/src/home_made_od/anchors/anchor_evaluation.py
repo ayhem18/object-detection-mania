@@ -15,22 +15,22 @@ from typing import Optional, Sequence
 import torch
 import torch.nn as nn
 
-from home_made_od.modules.anchors.anchor_eval_utils import (
+from home_made_od.anchors.anchor_eval_utils import (
     AnchorEvaluationReport,
     FlatCandidateBatch,
 )
-from home_made_od.modules.anchors.anchor_matching_test import (
+from home_made_od.anchors.anchor_matching_test import (
     DetectorMatchingReport,
     evaluate_detector_anchor_matching,
     format_detector_matching_report,
 )
-from home_made_od.modules.anchors.cell_recall_test import (
+from home_made_od.anchors.cell_recall_test import (
     CellRecallReport,
     evaluate_cell_recall,
     format_cell_recall_report,
     save_cell_recall_histogram,
 )
-from home_made_od.modules.od_metrics.grid_metrics import (
+from home_made_od.od_metrics.grid_metrics import (
     Grid,
     ReferenceCellAssignment,
 )

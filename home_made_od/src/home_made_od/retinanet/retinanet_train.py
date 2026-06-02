@@ -365,10 +365,10 @@ def train_retinanet_model(
 ):
     if anchor_spec is not None:
         from home_made_od.retinanet.retinanet_anchors import (
-            save_anchor_spec_to_artifact_dir,
+            save_anchor_spec_to_run_dir,
         )
 
-        save_anchor_spec_to_artifact_dir(anchor_spec, Path(artifact_dir))
+        save_anchor_spec_to_run_dir(anchor_spec, Path(artifact_dir))
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     # OneCycleLR is often good for detection

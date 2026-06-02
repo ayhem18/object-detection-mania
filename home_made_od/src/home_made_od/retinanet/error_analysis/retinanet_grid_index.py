@@ -9,26 +9,27 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import torch
 import torch.nn as nn
 
-from dl_lib.etalon_object_detection.modules.od_metrics.grid_metrics import (
+from home_made_od.od_metrics.grid_metrics import (
     Grid,
     ReferenceCellAssignment,
 )
 
-# Historical alias used in scripts.
-PriorCellAssignment = ReferenceCellAssignment
-from dl_lib.etalon_object_detection.modules.retinanet.retinanet_anchors import (
-    get_anchor_generator_config,
-)
+from home_made_od.retinanet.retinanet_anchors import load_anchor_config
 
 
-def level_ids_from_manifest(manifest_path: Optional[str]) -> Optional[List[str]]:
-    if manifest_path is None:
+def level_ids_from_anchor_config(config_path: Optional[str]) -> Optional[List[str]]:
+    if config_path is None:
         return None
-    metadata = get_anchor_generator_config(manifest_path)
-    levels = metadata.get("used_fpn_levels")
+    config = load_anchor_config(config_path)
+    levels = config.get("used_fpn_levels")
     if not levels:
         return None
     return [str(level) for level in levels]
+
+
+def level_ids_from_manifest(config_path: Optional[str]) -> Optional[List[str]]:
+    """Deprecated alias for :func:`level_ids_from_anchor_config`."""
+    return level_ids_from_anchor_config(config_path)
 
 
 def _strides_for_level(

@@ -1,13 +1,9 @@
 """
-Anchor manifests, optimization resolution, and torchvision AnchorGenerator wiring.
+RetinaNet anchor optimization, config I/O, and torchvision AnchorGenerator wiring.
 
-RetinaNet FPN / backbone coupling
----------------------------------
-Anchor clustering (in ``anchor_computation_strategies``) is detector-agnostic.
-This module applies RetinaNet-specific rules so ``used_fpn_levels`` stays aligned
-with :func:`retinanet_returned_layers` and the Etalon detector build path.
-
-See also ``retinanet_detector`` and ``tests/retinanet/test_retinanet_building.py``.
+Clustering is detector-agnostic (``anchor_computation_strategies``). This module
+applies RetinaNet FPN constraints and reads/writes a single ``anchor_config.json``
+with per-level sizes and aspect ratios — no per-box assignment files.
 """
 
 from __future__ import annotations
@@ -15,34 +11,27 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 
 from home_made_od.anchors.anchor_computation_strategies import (
     AnchorOptimizationResult,
+    BoxDimensions,
     FPN_LEVEL_ORDER,
     compute_optimized_anchors,
     validate_method_parameters,
 )
-from home_made_od.anchors.anchor_config_registry import (
-    load_registered_anchor_config,
-    resolve_anchor_config_hash,
-)
-from home_made_od.ds_utils import WeldingDetectionDataset
-from home_made_od.path_layout import (
-    ANCHOR_MANIFEST_FILENAME,
-    anchors_data_dir,
-    anchors_data_manifest_path,
-    iter_anchor_artifact_dirs,
-    iter_split_artifact_dirs,
-    split_artifacts_root,
-)
+from home_made_od.anchors.anchor_config_registry import resolve_anchor_config_hash
 
 logger = logging.getLogger(__name__)
+
+ANCHOR_CONFIG_FILENAME = "anchor_config.json"
+# Backward-compatible alias for older call sites.
+ANCHOR_MANIFEST_FILENAME = ANCHOR_CONFIG_FILENAME
 
 RETINANET_FPN_LEVEL_ORDER: Tuple[str, ...] = FPN_LEVEL_ORDER
 RETINANET_EARLY_FPN_LEVELS: Tuple[str, ...] = ("P2", "P3", "P4", "P5")
@@ -60,13 +49,12 @@ RESNET_OUT_CHANNELS: Dict[int, int] = {1: 256, 2: 512, 3: 1024, 4: 2048}
 
 @dataclass(frozen=True)
 class AnchorTrainingSpec:
-    """Resolved anchor manifest for training or inference."""
+    """Resolved per-level anchor config for training or inference."""
 
     method: str
     method_parameters: Dict[str, Any]
     config_hash: str
-    manifest_path: Path
-    config_dir: Path
+    config_path: Path
     used_fpn_levels: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,10 +62,14 @@ class AnchorTrainingSpec:
             "method": self.method,
             "method_parameters": self.method_parameters,
             "config_hash": self.config_hash,
-            "manifest_path": str(self.manifest_path),
-            "config_dir": str(self.config_dir),
+            "config_path": str(self.config_path),
             "used_fpn_levels": self.used_fpn_levels,
         }
+
+    @property
+    def manifest_path(self) -> Path:
+        """Deprecated alias for ``config_path``."""
+        return self.config_path
 
 
 def _sort_fpn_levels(levels: Iterable[str]) -> List[str]:
@@ -478,8 +470,8 @@ def _finalize_anchor_dicts(
     )
 
 
-def build_retinanet_manifest_metadata(result: AnchorOptimizationResult) -> Dict[str, Any]:
-    """Apply RetinaNet FPN finalization and assemble on-disk manifest metadata."""
+def build_retinanet_anchor_config(result: AnchorOptimizationResult) -> Dict[str, Any]:
+    """Apply RetinaNet FPN finalization and build the JSON-serializable anchor config."""
     fpn_specs = list(result.fpn_specs)
     level_aspect_ratios = dict(result.level_aspect_ratios)
     level_base_sizes = dict(result.level_base_sizes)
@@ -496,12 +488,9 @@ def build_retinanet_manifest_metadata(result: AnchorOptimizationResult) -> Dict[
     validate_retinanet_fpn_levels(used_fpn_levels)
 
     used_specs = [spec for spec in fpn_specs if spec["level"] in used_fpn_levels]
-    target_y_dim, target_x_dim = result.img_size
 
     return {
-        "dataset_hash": result.dataset_hash,
         "config_hash": result.config_hash,
-        "img_size": [target_y_dim, target_x_dim],
         "assignment_method": result.method,
         "fpn_specs": fpn_specs,
         "used_fpn_levels": used_fpn_levels,
@@ -512,91 +501,98 @@ def build_retinanet_manifest_metadata(result: AnchorOptimizationResult) -> Dict[
         "level_base_sizes": level_base_sizes,
         "method_parameters": result.method_parameters,
         "seed": result.seed,
+        "box_count": result.box_count,
     }
 
 
-def write_anchor_artifacts(
-    output_dir: Path,
-    metadata: Dict[str, Any],
-    enriched_samples: List[Dict[str, Any]],
-) -> Tuple[Path, Path]:
-    """Persist ``anchor_config.json`` and ``master_labels_enriched.json``."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    enriched_json_path = output_dir / "master_labels_enriched.json"
-    anchor_config_path = output_dir / ANCHOR_MANIFEST_FILENAME
-
-    with open(enriched_json_path, "w", encoding="utf-8") as file:
-        json.dump(
-            {"metadata": metadata, "samples": enriched_samples},
-            file,
-            indent=4,
-            ensure_ascii=False,
-        )
-
-    with open(anchor_config_path, "w", encoding="utf-8") as file:
-        json.dump(metadata, file, indent=4, ensure_ascii=False)
-
-    logger.info("RetinaNet anchor manifest saved to %s", anchor_config_path)
-    return enriched_json_path, anchor_config_path
+def write_anchor_config(config: Dict[str, Any], config_path: Path) -> Path:
+    """Write ``anchor_config.json`` (per-level anchors only)."""
+    config_path = Path(config_path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as file:
+        json.dump(config, file, indent=4, ensure_ascii=False)
+    logger.info("RetinaNet anchor config saved to %s", config_path)
+    return config_path
 
 
-def normalize_manifest_fpn_levels(metadata: Dict[str, Any]) -> Dict[str, Any]:
+def finalize_retinanet_anchor_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Re-apply RetinaNet FPN finalization on a stored manifest (legacy migration).
-
-    Mutates ``metadata`` in place and returns it.
+    Re-apply RetinaNet FPN finalization on a loaded config (mutates and returns it).
     """
-    _ensure_p2_fpn_spec(metadata["fpn_specs"])
-    ratios = metadata["level_aspect_ratios"]
-    metadata["used_fpn_levels"] = _finalize_anchor_dicts(
-        metadata["used_fpn_levels"],
+    _ensure_p2_fpn_spec(config["fpn_specs"])
+    ratios = config["level_aspect_ratios"]
+    config["used_fpn_levels"] = _finalize_anchor_dicts(
+        config["used_fpn_levels"],
         ratios,
-        metadata["level_base_sizes"],
-        metadata["fpn_specs"],
+        config["level_base_sizes"],
+        config["fpn_specs"],
         num_aspect_ratios=_num_aspect_ratios(ratios),
-        scales=metadata["scales"],
+        scales=config["scales"],
     )
-    return metadata
+    return config
 
 
-def _upgrade_legacy_manifest_if_needed(manifest_path: Path) -> None:
-    """Rewrite on-disk manifests that predate RetinaNet FPN finalization."""
-    with open(manifest_path, "r", encoding="utf-8") as file:
-        metadata = json.load(file)
-
-    original_levels = list(metadata.get("used_fpn_levels", []))
-    normalize_manifest_fpn_levels(metadata)
-    if metadata["used_fpn_levels"] == original_levels:
-        return
-
-    with open(manifest_path, "w", encoding="utf-8") as file:
-        json.dump(metadata, file, indent=4, ensure_ascii=False)
-
-    enriched_path = manifest_path.parent / "master_labels_enriched.json"
-    if enriched_path.is_file():
-        with open(enriched_path, "r", encoding="utf-8") as file:
-            enriched = json.load(file)
-        enriched["metadata"] = metadata
-        with open(enriched_path, "w", encoding="utf-8") as file:
-            json.dump(enriched, file, indent=4, ensure_ascii=False)
+def load_anchor_config(config_path: str | Path) -> Dict[str, Any]:
+    """Load ``anchor_config.json`` and apply RetinaNet FPN finalization."""
+    path = Path(config_path)
+    with open(path, encoding="utf-8") as file:
+        data = json.load(file)
+    # Accept legacy wrapper ``{"metadata": {...}}`` from older pipelines.
+    if "used_fpn_levels" not in data and "metadata" in data:
+        data = data["metadata"]
+    return finalize_retinanet_anchor_config(data)
 
 
-def optimize_retinanet_anchors(
-    dataset: WeldingDetectionDataset,
-    output_dir: Path,
-    dataset_hash: str,
+def anchor_spec_from_path(config_path: str | Path) -> AnchorTrainingSpec:
+    """Build :class:`AnchorTrainingSpec` from ``anchor_config.json``."""
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"anchor config not found: {path}")
+    config = load_anchor_config(path)
+    method = config["assignment_method"]
+    method_parameters = config["method_parameters"]
+    validate_method_parameters(method, method_parameters)
+    validate_retinanet_fpn_levels(config["used_fpn_levels"])
+    return AnchorTrainingSpec(
+        method=method,
+        method_parameters=dict(method_parameters),
+        config_hash=config["config_hash"],
+        config_path=path.resolve(),
+        used_fpn_levels=list(config["used_fpn_levels"]),
+    )
+
+
+def compute_and_save_retinanet_anchors(
+    box_dimensions: Sequence[BoxDimensions],
+    anchor_config_path: Path,
+    *,
     method: str,
     method_parameters: Dict[str, Any],
-) -> Tuple[Path, Path]:
-    """Cluster anchors, finalize for RetinaNet, and write manifest artifacts once."""
-    result = compute_optimized_anchors(
-        dataset=dataset,
-        dataset_hash=dataset_hash,
-        method=method,
-        method_parameters=method_parameters,
-    )
-    metadata = build_retinanet_manifest_metadata(result)
-    return write_anchor_artifacts(output_dir, metadata, result.enriched_samples)
+    force: bool = False,
+) -> AnchorTrainingSpec:
+    """
+    Cluster anchors from GT box sizes and write a single ``anchor_config.json``.
+
+    The training script is responsible for building ``box_dimensions`` (e.g. from YOLO
+    labels at the resize used for training).
+    """
+    anchor_config_path = Path(anchor_config_path)
+    if force or not anchor_config_path.is_file():
+        logger.info(
+            "Computing RetinaNet anchors: %d boxes, method=%s -> %s",
+            len(box_dimensions),
+            method,
+            anchor_config_path,
+        )
+        result = compute_optimized_anchors(
+            box_dimensions,
+            method=method,
+            method_parameters=method_parameters,
+        )
+        write_anchor_config(build_retinanet_anchor_config(result), anchor_config_path)
+    else:
+        logger.info("Reusing anchor config: %s", anchor_config_path)
+    return anchor_spec_from_path(anchor_config_path)
 
 
 def get_anchor_config_hash(config: Dict[str, Any]) -> str:
@@ -604,182 +600,37 @@ def get_anchor_config_hash(config: Dict[str, Any]) -> str:
     return resolve_anchor_config_hash(config)
 
 
-def get_anchor_generator_config(manifest_path: str | Path) -> Dict[str, Any]:
-    """Load manifest metadata from split-dependent ``anchor_config.json``."""
-    with open(manifest_path, "r", encoding="utf-8") as file:
-        data = json.load(file)
-    if "metadata" in data:
-        metadata = data["metadata"]
-    else:
-        metadata = data
-
-    return normalize_manifest_fpn_levels(metadata)
+def get_anchor_generator_config(config_path: str | Path) -> Dict[str, Any]:
+    """Deprecated alias for :func:`load_anchor_config`."""
+    return load_anchor_config(config_path)
 
 
-def _spec_from_manifest(manifest_path: Path, config_dir: Path) -> AnchorTrainingSpec:
-    metadata = get_anchor_generator_config(manifest_path)
-    method = metadata["assignment_method"]
-    method_parameters = metadata["method_parameters"]
-    validate_method_parameters(method, method_parameters)
-    validate_retinanet_fpn_levels(metadata["used_fpn_levels"])
-    return AnchorTrainingSpec(
-        method=method,
-        method_parameters=dict(method_parameters),
-        config_hash=metadata["config_hash"],
-        manifest_path=manifest_path,
-        config_dir=config_dir,
-        used_fpn_levels=list(metadata["used_fpn_levels"]),
-    )
+def build_retinanet_manifest_metadata(result: AnchorOptimizationResult) -> Dict[str, Any]:
+    """Deprecated alias for :func:`build_retinanet_anchor_config`."""
+    return build_retinanet_anchor_config(result)
 
 
-def ensure_anchor_training_spec(
-    config: Dict[str, Any],
-    *,
-    dataset: WeldingDetectionDataset,
-    dataset_hash: str,
-    split_hash: str,
-    force_reoptimize: bool,
-) -> AnchorTrainingSpec:
-    """
-    Resolve or create split-dependent anchors under
-    ``{split_hash}/{anchor_config_hash}/anchors_data/``.
-
-    Requires a registered recipe in ``labeling/anchor_configs/{config_hash}.json``.
-    """
-    anchor_config_hash = resolve_anchor_config_hash(config)
-    recipe = load_registered_anchor_config(anchor_config_hash)
-    method = recipe["method"]
-    method_parameters = recipe["method_parameters"]
-
-    config_dir = anchors_data_dir(dataset_hash, split_hash, anchor_config_hash)
-    manifest_path = config_dir / ANCHOR_MANIFEST_FILENAME
-
-    if force_reoptimize or not manifest_path.is_file():
-        logger.info(
-            "Optimizing anchors: method=%s, config_hash=%s, dir=%s",
-            method,
-            anchor_config_hash,
-            config_dir,
-        )
-        optimize_retinanet_anchors(
-            dataset=dataset,
-            output_dir=config_dir,
-            dataset_hash=dataset_hash,
-            method=method,
-            method_parameters=method_parameters,
-        )
-    else:
-        logger.info("Reusing anchors_data manifest: %s", manifest_path)
-        _upgrade_legacy_manifest_if_needed(manifest_path)
-
-    return _spec_from_manifest(manifest_path, config_dir)
+def normalize_manifest_fpn_levels(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Deprecated alias for :func:`finalize_retinanet_anchor_config`."""
+    return finalize_retinanet_anchor_config(config)
 
 
-def save_anchor_spec_to_artifact_dir(spec: AnchorTrainingSpec, artifact_dir: Path) -> None:
-    """Copy anchor manifest metadata into a training run directory."""
-    artifact_dir = Path(artifact_dir)
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    with open(artifact_dir / "anchor_training_spec.json", "w", encoding="utf-8") as file:
-        json.dump(spec.to_dict(), file, indent=2, ensure_ascii=False)
-    dest = artifact_dir / ANCHOR_MANIFEST_FILENAME
-    if not dest.exists():
-        shutil.copy2(spec.manifest_path, dest)
+def anchor_spec_from_manifest_path(config_path: str | Path) -> AnchorTrainingSpec:
+    """Deprecated alias for :func:`anchor_spec_from_path`."""
+    return anchor_spec_from_path(config_path)
 
 
-def _iter_anchor_manifest_paths(dataset_hash: str) -> Iterator[Path]:
-    """Yield ``anchor_config.json`` paths under each anchor-config artifact root."""
-    for split_dir in iter_split_artifact_dirs(dataset_hash):
-        for anchor_dir in iter_anchor_artifact_dirs(dataset_hash, split_dir.name):
-            manifest = anchor_dir / "anchors_data" / ANCHOR_MANIFEST_FILENAME
-            if manifest.is_file():
-                yield manifest
-
-
-def resolve_split_anchor_config(
-    dataset_hash: str,
-    config_hash: Optional[str] = None,
-    split_hash: Optional[str] = None,
-) -> Tuple[Path, Path]:
-    """
-    Resolve a split-dependent anchor manifest.
-
-    Returns ``(anchor_config.json path, anchors_data directory)``.
-    """
-    if config_hash is not None:
-        load_registered_anchor_config(config_hash)
-        if split_hash is not None:
-            cfg_path = anchors_data_manifest_path(dataset_hash, split_hash, config_hash)
-            if not cfg_path.is_file():
-                raise FileNotFoundError(
-                    f"No anchors_data manifest at {cfg_path.parent}. "
-                    f"Run anchors_matching_sanity_check.py or training with "
-                    f"force_reoptimize_anchors=True for dataset={dataset_hash}, "
-                    f"split={split_hash}, config={config_hash}."
-                )
-            return cfg_path, cfg_path.parent
-
-        matches = [
-            path
-            for path in _iter_anchor_manifest_paths(dataset_hash)
-            if path.parent.parent.name == config_hash
-        ]
-        if not matches:
-            raise FileNotFoundError(
-                f"No anchors_data manifest for config_hash={config_hash} "
-                f"under dataset {dataset_hash}."
-            )
-        cfg_path = max(matches, key=lambda path: path.stat().st_mtime)
-        return cfg_path, cfg_path.parent
-
-    if split_hash is not None:
-        candidates = [
-            anchors_data_manifest_path(dataset_hash, split_hash, directory.name)
-            for directory in iter_anchor_artifact_dirs(dataset_hash, split_hash)
-            if anchors_data_manifest_path(dataset_hash, split_hash, directory.name).is_file()
-        ]
-        if candidates:
-            cfg_path = max(candidates, key=lambda path: path.stat().st_mtime)
-            return cfg_path, cfg_path.parent
-
-        raise FileNotFoundError(
-            f"No anchors_data manifests under split {split_hash} "
-            f"({split_artifacts_root(dataset_hash, split_hash)})."
-        )
-
-    candidates = list(_iter_anchor_manifest_paths(dataset_hash))
-    if not candidates:
-        raise FileNotFoundError(
-            f"No anchors_data manifests found for dataset {dataset_hash}. "
-            "Run anchors_matching_sanity_check.py first."
-        )
-
-    cfg_path = max(candidates, key=lambda path: path.stat().st_mtime)
-    return cfg_path, cfg_path.parent
-
-
-def anchor_spec_from_manifest_path(manifest_path: str | Path) -> AnchorTrainingSpec:
-    """Build :class:`AnchorTrainingSpec` from an on-disk anchor manifest."""
-    path = Path(manifest_path)
-    if not path.is_file():
-        raise FileNotFoundError(f"anchor manifest not found: {path}")
-    return _spec_from_manifest(path, path.parent)
-
-
-def build_anchor_generator_from_manifest(
-    manifest_path: str | Path,
-) -> AnchorGenerator:
-    """
-    Build a torchvision ``AnchorGenerator`` from a split-dependent anchor manifest.
-    """
-    metadata = get_anchor_generator_config(manifest_path)
-    used_levels = metadata["used_fpn_levels"]
+def build_anchor_generator_from_config(config_path: str | Path) -> AnchorGenerator:
+    """Build a torchvision ``AnchorGenerator`` from ``anchor_config.json``."""
+    config = load_anchor_config(config_path)
+    used_levels = config["used_fpn_levels"]
     validate_retinanet_fpn_levels(used_levels)
-    level_ratios_map = metadata["level_aspect_ratios"]
-    level_base_sizes_map = metadata.get("level_base_sizes", {})
-    assignment_method = metadata["assignment_method"]
-    scales = metadata["scales"]
-    coefficient = metadata["coefficient"]
-    fpn_specs = {spec["level"]: spec for spec in metadata["fpn_specs"]}
+    level_ratios_map = config["level_aspect_ratios"]
+    level_base_sizes_map = config.get("level_base_sizes", {})
+    assignment_method = config["assignment_method"]
+    scales = config["scales"]
+    coefficient = config["coefficient"]
+    fpn_specs = {spec["level"]: spec for spec in config["fpn_specs"]}
 
     anchor_sizes = []
     aspect_ratios = []
@@ -804,8 +655,29 @@ def build_anchor_generator_from_manifest(
     return AnchorGenerator(tuple(anchor_sizes), tuple(aspect_ratios))
 
 
+def build_anchor_generator_from_manifest(config_path: str | Path) -> AnchorGenerator:
+    """Deprecated alias for :func:`build_anchor_generator_from_config`."""
+    return build_anchor_generator_from_config(config_path)
+
+
+def save_anchor_spec_to_artifact_dir(spec: AnchorTrainingSpec, artifact_dir: Path) -> None:
+    """Deprecated alias for :func:`save_anchor_spec_to_run_dir`."""
+    save_anchor_spec_to_run_dir(spec, artifact_dir)
+
+
+def save_anchor_spec_to_run_dir(spec: AnchorTrainingSpec, run_dir: Path) -> None:
+    """Copy anchor config into a training run directory."""
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with open(run_dir / "anchor_training_spec.json", "w", encoding="utf-8") as file:
+        json.dump(spec.to_dict(), file, indent=2, ensure_ascii=False)
+    dest = run_dir / ANCHOR_CONFIG_FILENAME
+    if not dest.exists():
+        shutil.copy2(spec.config_path, dest)
+
+
 def build_anchor_generator_from_spec(
     anchor_spec: AnchorTrainingSpec,
 ) -> AnchorGenerator:
     """Build ``AnchorGenerator`` from a resolved :class:`AnchorTrainingSpec`."""
-    return build_anchor_generator_from_manifest(anchor_spec.manifest_path)
+    return build_anchor_generator_from_config(anchor_spec.config_path)
