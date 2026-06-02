@@ -278,9 +278,13 @@ def orchestrate_image_patches(image_path: str, label_path: str, output_dir: str,
         cv2.imwrite(str(img_out_dir / patch_filename), patch_img)
 
 def run_visualization_sample(data_dir: str, output_dir: str, K2: int = 2, max_images: int = 5):
-    img_dir = Path(data_dir) / 'train' / 'images'
-    lbl_dir = Path(data_dir) / 'labels' / 'annotations'
-    
+    root = Path(data_dir)
+    img_dir = root / "images"
+    lbl_dir = root / "labels"
+    if not img_dir.is_dir():
+        img_dir = root / "train" / "images"
+        lbl_dir = root / "labels" / "annotations"
+
     if not img_dir.exists() or not lbl_dir.exists():
         print(f"Data directories not found in {data_dir}")
         return
@@ -301,15 +305,22 @@ def run_visualization_sample(data_dir: str, output_dir: str, K2: int = 2, max_im
         count += 1
 
 if __name__ == "__main__":
-    import sys
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    while 'road_sign' not in os.listdir(current_dir):
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir == current_dir: break
-        current_dir = parent_dir
-    road_sign_root = os.path.join(current_dir, 'road_sign')
-    
-    data_dir = os.path.join(road_sign_root, 'data')
-    out_dir = os.path.join(road_sign_root, 'artifacts', 'patch_visualization')
-    
-    run_visualization_sample(data_dir, out_dir, K2=2, max_images=3)
+    from home_made_od.general.path_utils import (
+        DATASET_VERSION_ORIGINAL,
+        dataset_root,
+        legacy_flat_data_dir,
+        patch_visualization_dir,
+        resolve_latest_dataset_hash,
+        register_original_dataset_from_dir,
+    )
+
+    source_hash = resolve_latest_dataset_hash(DATASET_VERSION_ORIGINAL)
+    if source_hash is None:
+        legacy = legacy_flat_data_dir()
+        if (legacy / "train" / "images").is_dir():
+            source_hash = register_original_dataset_from_dir(legacy, copy=True)
+        else:
+            raise FileNotFoundError("No original dataset found. Run prepare_data.py first.")
+
+    data_dir = str(dataset_root(DATASET_VERSION_ORIGINAL, source_hash))
+    run_visualization_sample(data_dir, str(patch_visualization_dir()), K2=2, max_images=3)
