@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import random
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple
 
 def calculate_iou(box1: np.ndarray, box2: np.ndarray) -> float:
     """

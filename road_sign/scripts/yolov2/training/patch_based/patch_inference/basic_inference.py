@@ -29,9 +29,11 @@ road_sign_root = os.path.join(workspace_root, 'road_sign')
 sys.path.insert(0, workspace_root)
 
 from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
-from mypt.backbones.resnetFE import ResnetFE
 from mypt.code_utils.pytorch_utils import seed_everything
 import torchvision.ops as ops
+
+# Import from refactored train_utils
+from road_sign.scripts.training.patch_based.train_scripts.train_utils import build_model
 
 
 # --- STAGE 1: Fast Parallel Patch Generation ---
@@ -134,16 +136,25 @@ def run_optimized_patch_inference(artifact_dir, test_images_dir, output_csv, bat
     # 1. Setup paths and load configs
     with open(os.path.join(artifact_dir, "config.yaml"), "r") as f:
         config = yaml.safe_load(f)
+        
     data_dir_full = os.path.join(road_sign_root, config.get("data_dir"))
+    SPLIT_HASH_DIR = config.get("split_hash_dir", data_dir_full)
     
-    with open(os.path.join(data_dir_full, "anchors.json"), "r") as f:
+    if not os.path.isabs(SPLIT_HASH_DIR) and not SPLIT_HASH_DIR.startswith(road_sign_root):
+        SPLIT_HASH_DIR = os.path.join(data_dir_full, os.path.basename(SPLIT_HASH_DIR))
+    
+    anchors_path = os.path.join(SPLIT_HASH_DIR, "anchors.json")
+    if not os.path.exists(anchors_path):
+        anchors_path = os.path.join(data_dir_full, "anchors.json")
+        
+    with open(anchors_path, "r") as f:
         anchors = json.load(f)["anchors"]
-    with open(os.path.join(data_dir_full, "config.yaml"), "r") as f:
-        patch_config = yaml.safe_load(f)
+        
+    patch_config = config.get("patch_config", {})
+    target_size = tuple(patch_config.get("target_size", config.get("img_size", [512, 512])))
+    patch_scales = patch_config.get("scales", [512, 1024, 2048])
     
     tmp_patch_dir = os.path.join(road_sign_root, "temp_inference_patches")
-    target_size = tuple(patch_config["target_size"])
-    patch_scales = patch_config["scales"]
     
     # 2. Stage 1: Parallel Patch Extraction
     test_images = []
@@ -158,21 +169,19 @@ def run_optimized_patch_inference(artifact_dir, test_images_dir, output_csv, bat
 
     # 3. Stage 2: Fast Inference
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    resnet_fe = ResnetFE(build_by_layer=True, 
-                        num_extracted_layers=-1, 
-                        num_extracted_bottlenecks=-1,
-                        freeze=2,
-                        freeze_by_layer=True,
-                        add_global_average=False,
-                        architecture=50)
-    model = YoloV2(backbone=resnet_fe, backbone_out_channels=2048, num_anchors=len(anchors), num_classes=config["num_classes"], num_conv_blocks=2)
-    model.to(device)
+    
+    model_obj, transform_stats = build_model(config["num_classes"], len(anchors))
+    model_obj.to(device)
     
     checkpoint = torch.load(os.path.join(artifact_dir, "checkpoints", "best_model.pt"), map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint)
-    model.eval()
+    model_obj.load_state_dict(checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint)
+    model_obj.eval()
 
-    preprocess = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean=resnet_fe.transform.mean, std=resnet_fe.transform.std)])
+    preprocess = v2.Compose([
+        v2.ToImage(), 
+        v2.ToDtype(torch.float32, scale=True), 
+        v2.Normalize(mean=transform_stats.mean, std=transform_stats.std)
+    ])
     
     dataset = PreSlicedPatchDataset(all_metadata, tmp_patch_dir, preprocess)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=6, pin_memory=True)
@@ -182,7 +191,7 @@ def run_optimized_patch_inference(artifact_dir, test_images_dir, output_csv, bat
     with torch.no_grad():
         for batch_tensors, batch_idxs in tqdm(dataloader, desc="Inferencing Patches"):
             batch_tensors = batch_tensors.to(device)
-            batch_preds = model.inference(batch_tensors, anchors=anchors, conf_threshold=conf_thresh, nms_iou_threshold=iou_thresh)
+            batch_preds = model_obj.inference(batch_tensors, anchors=anchors, conf_threshold=conf_thresh, nms_iou_threshold=iou_thresh)
             
             for i, preds in enumerate(batch_preds):
                 if len(preds) == 0: continue
@@ -226,6 +235,7 @@ def run_optimized_patch_inference(artifact_dir, test_images_dir, output_csv, bat
     print(f"Submission saved to {output_csv}")
 
 if __name__ == "__main__":
+    # Replace with your actual V2 experiment hash to run inference
     EXPERIMENT_HASH = "89906949f97db5b404463e90b7cd7767"
     ARTIFACT_DIR = os.path.join(road_sign_root, 'artifacts', 'patch_based', EXPERIMENT_HASH)
     TEST_DIR = os.path.join(road_sign_root, 'data', 'test', 'images')

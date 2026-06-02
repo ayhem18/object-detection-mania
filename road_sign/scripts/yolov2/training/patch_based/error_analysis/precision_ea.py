@@ -31,31 +31,31 @@ sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_ba
 sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_based', 'patch_inference'))
 
 from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
-from basic_inference import build_inference_model, PatchInferenceDataset, patch_collate_fn
+from basic_inference import PatchInferenceDataset, patch_collate_fn
 from mypt.code_utils.pytorch_utils import seed_everything
 
+# Import from refactored train_utils
+from road_sign.scripts.training.patch_based.train_scripts.train_utils import split_by_original_image, build_model
+
 def get_val_stems(data_patch_dir, train_ratio=0.9, seed=42):
-    img_dir = os.path.join(data_patch_dir, 'train', 'images')
-    all_subdirs = [d for d in os.listdir(img_dir) if os.path.isdir(os.path.join(img_dir, d))]
-    
-    import random
-    random.seed(seed)
-    random.shuffle(all_subdirs)
-    split_idx = int(len(all_subdirs) * train_ratio)
-    val_subdirs = all_subdirs[split_idx:]
+    _, val_subdirs = split_by_original_image(data_patch_dir, train_ratio=train_ratio, seed=seed)
     return val_subdirs
 
 def main():
     seed_everything(42)
     
-    # 1. Configuration
+    # 1. Configuration - Set your experiment hash here
     EXPERIMENT_HASH = "89906949f97db5b404463e90b7cd7767"
     ARTIFACT_DIR = os.path.join(road_sign_root, 'artifacts', 'patch_based', EXPERIMENT_HASH)
     
     with open(os.path.join(ARTIFACT_DIR, "config.yaml"), "r") as f:
         config = yaml.safe_load(f)
         
-    data_patch_dir = os.path.join(road_sign_root, config.get("data_dir"))
+    DATA_DIR = os.path.join(road_sign_root, config.get("data_dir"))
+    SPLIT_HASH_DIR = config.get("split_hash_dir", DATA_DIR)
+    
+    if not os.path.isabs(SPLIT_HASH_DIR) and not SPLIT_HASH_DIR.startswith(road_sign_root):
+        SPLIT_HASH_DIR = os.path.join(DATA_DIR, os.path.basename(SPLIT_HASH_DIR))
     
     # Thresholds for statistics
     THRESHOLDS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
@@ -66,15 +66,18 @@ def main():
     # 2. Load Model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    with open(os.path.join(data_patch_dir, "anchors.json"), "r") as f:
-        anchors = json.load(f)["anchors"]
-    with open(os.path.join(data_patch_dir, "config.yaml"), "r") as f:
-        patch_config = yaml.safe_load(f)
+    anchors_path = os.path.join(SPLIT_HASH_DIR, "anchors.json")
+    if not os.path.exists(anchors_path):
+        anchors_path = os.path.join(DATA_DIR, "anchors.json")
         
-    target_size = tuple(patch_config["target_size"])
-    patch_scales = patch_config["scales"]
+    with open(anchors_path, "r") as f:
+        anchors = json.load(f)["anchors"]
+        
+    patch_config = config.get("patch_config", {})
+    target_size = tuple(patch_config.get("target_size", config.get("img_size", [512, 512])))
+    patch_scales = patch_config.get("scales", [512, 1024, 2048])
     
-    model, transform_stats = build_inference_model(config["num_classes"], len(anchors))
+    model, transform_stats = build_model(config["num_classes"], len(anchors))
     model.to(device)
     
     checkpoint_path = os.path.join(ARTIFACT_DIR, "checkpoints", "best_model.pt")
@@ -83,7 +86,10 @@ def main():
     model.eval()
 
     # 3. Get Validation Images and Labels
-    val_stems = get_val_stems(data_patch_dir)
+    seed = config.get("seed", 42)
+    train_ratio = config.get("train_ratio", 0.9)
+    val_stems = get_val_stems(DATA_DIR, train_ratio=train_ratio, seed=seed)
+    
     val_img_paths = [os.path.join(road_sign_root, 'data', 'train', 'images', f"{s}.jpg") for s in val_stems]
     val_img_paths = [p for p in val_img_paths if os.path.exists(p)]
     

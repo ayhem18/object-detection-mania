@@ -26,40 +26,20 @@ sys.path.insert(0, workspace_root)
 sys.path.insert(0, os.path.join(road_sign_root, 'scripts', 'training', 'patch_based'))
 
 from home_made_od.yolo_family.yolov2.yolov2_model import YoloV2
-from home_made_od.yolo_v2.modules.yolov2_diagnosis import analyze_gt_matches, DiagnosisDataset, plot_diagnostic_results
+from home_made_od.yolo_family.diagnosis.yolov2_diagnosis import analyze_gt_matches, DiagnosisDataset, plot_diagnostic_results
 from home_made_od.od_metrics import evaluate_model
 from road_sign.utils.data_utils import YoloFormatDataset, yolov2_collate_fn
 from mypt.backbones.resnetFE import ResnetFE
 from mypt.code_utils.pytorch_utils import seed_everything
 
-# Import the split function from training script to guarantee exact same validation set
-from patch_train import split_by_original_image
-
-def build_model(num_classes, num_anchors):
-    resnet_fe = ResnetFE(
-        build_by_layer=True,
-        num_extracted_layers=-1, 
-        num_extracted_bottlenecks=-1,
-        freeze=2,
-        freeze_by_layer=True,
-        add_global_average=False,
-        architecture=50
-    )
-    backbone_out_channels = 2048 
-    model = YoloV2(
-        backbone=resnet_fe,
-        backbone_out_channels=backbone_out_channels,
-        num_anchors=num_anchors,
-        num_classes=num_classes,
-        num_conv_blocks=2
-    )
-    return model, resnet_fe.transform
+# Import from the refactored train_utils
+from road_sign.scripts.training.patch_based.train_scripts.train_utils import split_by_original_image, gather_pairs_from_subdirs, build_model
 
 def main():
     seed_everything(42)
     
-    # 1. Configuration
-    EXPERIMENT_HASH = "89906949f97db5b404463e90b7cd7767"
+    # 1. Configuration - Set your V2 experiment hash here
+    EXPERIMENT_HASH = "89906949f97db5b404463e90b7cd7767" # Replace with your actual V2 hash
     ARTIFACT_DIR = os.path.join(road_sign_root, 'artifacts', 'patch_based', EXPERIMENT_HASH)
     
     if not os.path.exists(ARTIFACT_DIR):
@@ -70,7 +50,12 @@ def main():
         config = yaml.safe_load(f)
         
     DATA_DIR = os.path.join(road_sign_root, config.get("data_dir"))
+    SPLIT_HASH_DIR = config.get("split_hash_dir", DATA_DIR) # Fallback to DATA_DIR if not present in older configs
     
+    # If split_hash_dir is just the basename, join it with DATA_DIR
+    if not os.path.isabs(SPLIT_HASH_DIR) and not SPLIT_HASH_DIR.startswith(road_sign_root):
+        SPLIT_HASH_DIR = os.path.join(DATA_DIR, os.path.basename(SPLIT_HASH_DIR))
+
     # Thresholds
     CONF_THRESH = 0.05
     NMS_THRESH = 0.4
@@ -81,13 +66,23 @@ def main():
     os.makedirs(VIS_DIR, exist_ok=True)
 
     # 2. Get exact Validation Split used during training
-    _, val_pairs = split_by_original_image(DATA_DIR, train_ratio=0.9)
+    # Use the seed and ratio from the config to guarantee identical split
+    seed = config.get("seed", 42)
+    train_ratio = config.get("train_ratio", 0.9)
+    _, val_subdirs = split_by_original_image(DATA_DIR, train_ratio=train_ratio, seed=seed)
+    val_pairs = gather_pairs_from_subdirs(DATA_DIR, val_subdirs)
+    
     print(f"Evaluating model purely on {len(val_pairs)} generated validation patches.")
 
     # 3. Load Model and Configs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    with open(os.path.join(DATA_DIR, "anchors.json"), "r") as f:
+    # Load anchors from the split hash directory (or fallback to DATA_DIR for V1)
+    anchors_path = os.path.join(SPLIT_HASH_DIR, "anchors.json")
+    if not os.path.exists(anchors_path):
+        anchors_path = os.path.join(DATA_DIR, "anchors.json")
+        
+    with open(anchors_path, "r") as f:
         anchors = json.load(f)["anchors"]
     
     IMG_SIZE = tuple(config.get("img_size", [512, 512]))
@@ -155,7 +150,7 @@ def main():
     diag_ds = DiagnosisDataset(val_img_paths, IMG_SIZE, preprocess)
     diag_loader = DataLoader(diag_ds, batch_size=16, shuffle=False, num_workers=4)
     
-    from home_made_od.yolo_v2.modules.yolov2_diagnosis import render_deferred_visualizations
+    from home_made_od.yolo_family.diagnosis.yolov2_diagnosis import render_deferred_visualizations
     all_diagnostics = []
     all_vis_tasks = []
     
