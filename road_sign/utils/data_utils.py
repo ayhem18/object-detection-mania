@@ -381,7 +381,6 @@ class RoadSignRetinaNetDataset(Dataset):
             ),
             "labels": label_tensor,
             "image_id": torch.tensor([idx]),
-            "sample_id": self.sample_ids[idx],
         }
 
         img, target = self.transformations(img, target)

@@ -56,7 +56,7 @@ DEFAULT_CONFIG: dict = {
         "seed": 42,
     },
     "train_params": {
-        "target_size": None,
+        "target_size": (512, 512),
         "batch_size": 16,
         "epochs": 50,
         "learning_rate": 1e-4,
