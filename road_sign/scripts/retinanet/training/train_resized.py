@@ -58,7 +58,7 @@ DEFAULT_CONFIG: dict = {
     },
     "train_params": {
         "target_size": (512, 512),
-        "batch_size": 4,
+        "batch_size": 32,
         "epochs": 150,
         "learning_rate": 1e-4,
         "early_stop_patience": 20,
