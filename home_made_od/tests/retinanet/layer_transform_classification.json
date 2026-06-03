@@ -1,0 +1,513 @@
+{
+  "none": {
+    "input_layers": [],
+    "classification": "build_error"
+  },
+  "1": {
+    "input_layers": [
+      1
+    ],
+    "classification": "count_mismatch"
+  },
+  "2": {
+    "input_layers": [
+      2
+    ],
+    "classification": "count_mismatch"
+  },
+  "3": {
+    "input_layers": [
+      3
+    ],
+    "classification": "count_mismatch"
+  },
+  "4": {
+    "input_layers": [
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "5": {
+    "input_layers": [
+      5
+    ],
+    "classification": "build_error"
+  },
+  "6": {
+    "input_layers": [
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,2": {
+    "input_layers": [
+      1,
+      2
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,3": {
+    "input_layers": [
+      1,
+      3
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,4": {
+    "input_layers": [
+      1,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,5": {
+    "input_layers": [
+      1,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "1,6": {
+    "input_layers": [
+      1,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "2,3": {
+    "input_layers": [
+      2,
+      3
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,4": {
+    "input_layers": [
+      2,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,5": {
+    "input_layers": [
+      2,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "2,6": {
+    "input_layers": [
+      2,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "3,4": {
+    "input_layers": [
+      3,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "3,5": {
+    "input_layers": [
+      3,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "3,6": {
+    "input_layers": [
+      3,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "4,5": {
+    "input_layers": [
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "4,6": {
+    "input_layers": [
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "5,6": {
+    "input_layers": [
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,2,3": {
+    "input_layers": [
+      1,
+      2,
+      3
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,4": {
+    "input_layers": [
+      1,
+      2,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,5": {
+    "input_layers": [
+      1,
+      2,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "1,2,6": {
+    "input_layers": [
+      1,
+      2,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,3,4": {
+    "input_layers": [
+      1,
+      3,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,3,5": {
+    "input_layers": [
+      1,
+      3,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "1,3,6": {
+    "input_layers": [
+      1,
+      3,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,4,5": {
+    "input_layers": [
+      1,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,4,6": {
+    "input_layers": [
+      1,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,5,6": {
+    "input_layers": [
+      1,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "2,3,4": {
+    "input_layers": [
+      2,
+      3,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,3,5": {
+    "input_layers": [
+      2,
+      3,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "2,3,6": {
+    "input_layers": [
+      2,
+      3,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "2,4,5": {
+    "input_layers": [
+      2,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,4,6": {
+    "input_layers": [
+      2,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,5,6": {
+    "input_layers": [
+      2,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "3,4,5": {
+    "input_layers": [
+      3,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "3,4,6": {
+    "input_layers": [
+      3,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "3,5,6": {
+    "input_layers": [
+      3,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "4,5,6": {
+    "input_layers": [
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "1,2,3,4": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,3,5": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      5
+    ],
+    "classification": "build_error"
+  },
+  "1,2,3,6": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,2,4,5": {
+    "input_layers": [
+      1,
+      2,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,4,6": {
+    "input_layers": [
+      1,
+      2,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,5,6": {
+    "input_layers": [
+      1,
+      2,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,3,4,5": {
+    "input_layers": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,3,4,6": {
+    "input_layers": [
+      1,
+      3,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,3,5,6": {
+    "input_layers": [
+      1,
+      3,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,4,5,6": {
+    "input_layers": [
+      1,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "2,3,4,5": {
+    "input_layers": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,3,4,6": {
+    "input_layers": [
+      2,
+      3,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "2,3,5,6": {
+    "input_layers": [
+      2,
+      3,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "2,4,5,6": {
+    "input_layers": [
+      2,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "3,4,5,6": {
+    "input_layers": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "1,2,3,4,5": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,3,4,6": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      4,
+      6
+    ],
+    "classification": "count_mismatch"
+  },
+  "1,2,3,5,6": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      5,
+      6
+    ],
+    "classification": "build_error"
+  },
+  "1,2,4,5,6": {
+    "input_layers": [
+      1,
+      2,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "1,3,4,5,6": {
+    "input_layers": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "2,3,4,5,6": {
+    "input_layers": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  },
+  "1,2,3,4,5,6": {
+    "input_layers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "classification": "anchor_aligned"
+  }
+}

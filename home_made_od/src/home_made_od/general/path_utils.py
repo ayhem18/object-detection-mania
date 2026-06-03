@@ -780,6 +780,21 @@ def load_anchors(
         return json.load(f)["anchors"]
 
 
+def write_json_file(path: Path, payload: Dict[str, Any], *, indent: int = 4) -> Path:
+    """Write a JSON file, creating parent directories as needed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=indent, ensure_ascii=False)
+    return path
+
+
+def read_json_file(path: Path) -> Dict[str, Any]:
+    """Load a JSON object from *path*."""
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def compute_experiment_hash(config: Dict[str, Any]) -> str:
     """MD5 of experiment-defining parameters (for run artifact subfolders)."""
     return canonical_json_hash(config)
