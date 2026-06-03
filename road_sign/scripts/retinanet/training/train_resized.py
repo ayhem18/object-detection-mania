@@ -70,7 +70,9 @@ DEFAULT_CONFIG: dict = {
     "augmentation": {
         "horizontal_flip_p": 0.5,
     },
-    "label_id_offset": 1,
+    # None → build contiguous map from class_mapping (YOLO 0..N-1 → RetinaNet 1..N)
+    "class_id_map": None,
+    "retinanet_label_start": 1,
     "seed": 42,
     "force_recompute_anchors": False,
     "checkpoint_path": None,

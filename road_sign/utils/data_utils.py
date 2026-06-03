@@ -212,33 +212,93 @@ def road_sign_num_classes(
     return len(load_road_sign_class_mapping(version, dataset_hash))
 
 
+def validate_retinanet_class_id_map(class_id_map: Dict[int, int]) -> Dict[int, int]:
+    """
+    Ensure a dataset-id → model-id map is valid for RetinaNet (background = 0).
+
+    Model ids must be unique, integers, and never 0.
+    """
+    if not class_id_map:
+        raise ValueError("class_id_map must not be empty.")
+    normalized = {int(k): int(v) for k, v in class_id_map.items()}
+    values = set(normalized.values())
+    if 0 in values:
+        raise ValueError("class_id_map must not assign label 0 (reserved for background).")
+    if len(values) != len(normalized):
+        raise ValueError("class_id_map model label ids must be unique.")
+    return normalized
+
+
+def build_retinanet_class_id_map(
+    class_mapping: Dict[int, str],
+    *,
+    start_index: int = 1,
+) -> Dict[int, int]:
+    """
+    Map sorted dataset class ids to contiguous RetinaNet foreground ids.
+
+    Example: YOLO ids ``{0, …, 7}`` with ``start_index=1`` → ``{0: 1, …, 7: 8}``.
+    """
+    if start_index < 1:
+        raise ValueError(f"start_index must be >= 1, got {start_index}.")
+    return {
+        orig_id: start_index + index
+        for index, orig_id in enumerate(sorted(int(k) for k in class_mapping))
+    }
+
+
+def retinanet_num_classes(class_id_map: Dict[int, int]) -> int:
+    """Torchvision ``num_classes`` (foreground labels plus implicit background at 0)."""
+    validated = validate_retinanet_class_id_map(class_id_map)
+    return max(validated.values()) + 1
+
+
+def retinanet_cls_id_to_name(
+    class_mapping: Dict[int, str],
+    class_id_map: Dict[int, int],
+) -> Dict[int, str]:
+    """Model label id → human-readable name (for logging / diagnostics)."""
+    validated = validate_retinanet_class_id_map(class_id_map)
+    return {
+        validated[orig_id]: class_mapping[orig_id]
+        for orig_id in validated
+        if orig_id in class_mapping
+    }
+
+
 def _yolo_lines_to_xyxy(
     label_path: Path,
     image_width: int,
     image_height: int,
-    label_id_offset: int,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    class_id_map: Dict[int, int]) -> Tuple[torch.Tensor, torch.Tensor]:
     """Parse YOLO ``cls cx cy w h`` (normalized) into XYXY tensors for RetinaNet."""
     boxes: list[list[float]] = []
     labels: list[int] = []
 
-    if label_path.is_file():
-        with open(label_path, encoding="utf-8") as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) < 5:
-                    continue
-                cls_id = int(float(parts[0])) + label_id_offset
-                cx = float(parts[1]) * image_width
-                cy = float(parts[2]) * image_height
-                bw = float(parts[3]) * image_width
-                bh = float(parts[4]) * image_height
-                x1 = cx - bw / 2
-                y1 = cy - bh / 2
-                x2 = cx + bw / 2
-                y2 = cy + bh / 2
-                boxes.append([x1, y1, x2, y2])
-                labels.append(cls_id)
+    if not label_path.is_file():
+        raise FileNotFoundError(f"Label file not found at {label_path}")
+
+    with open(label_path, encoding="utf-8") as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            orig_cls = int(float(parts[0]))
+
+            if orig_cls not in class_id_map:
+                raise KeyError(f"Label class {orig_cls} in {label_path} is not in class_id_map.")
+
+            cls_id = class_id_map[orig_cls]
+            cx = float(parts[1]) * image_width
+            cy = float(parts[2]) * image_height
+            bw = float(parts[3]) * image_width
+            bh = float(parts[4]) * image_height
+            x1 = cx - bw / 2
+            y1 = cy - bh / 2
+            x2 = cx + bw / 2
+            y2 = cy + bh / 2
+            boxes.append([x1, y1, x2, y2])
+            labels.append(cls_id)
 
     if boxes:
         box_tensor = torch.as_tensor(boxes, dtype=torch.float32)
@@ -302,21 +362,22 @@ class RoadSignRetinaNetDataset(Dataset):
     - ``image`` is a ``float32`` CHW tensor in ``[0, 1]``
     - ``target`` is a dict with ``boxes`` (XYXY), ``labels``, ``image_id``, ``area``, ``iscrowd``
 
-    YOLO label files use 0-based class ids; by default ``label_id_offset=1`` maps them to
-    RetinaNet's 1-based foreground labels (background is implicit at 0).
+    ``class_id_map`` maps dataset (YOLO) class indices to model label ids. RetinaNet reserves
+    0 for background; foreground ids must be ``>= 1`` (typically contiguous from the training
+    script via :func:`build_retinanet_class_id_map`).
     """
 
     def __init__(
         self,
         data_pairs: Sequence[Tuple[str, str]],
         target_size: Tuple[int, int],
+        class_id_map: Dict[int, int],
         transformations: Optional[Callable] = None,
-        label_id_offset: int = 1,
         sample_ids: Optional[Sequence[str]] = None,
     ):
         self.data_pairs = list(data_pairs)
         self.target_size = target_size
-        self.label_id_offset = label_id_offset
+        self.class_id_map = validate_retinanet_class_id_map(class_id_map)
         self.sample_ids = (
             list(sample_ids)
             if sample_ids is not None
@@ -335,8 +396,8 @@ class RoadSignRetinaNetDataset(Dataset):
         split_hash: str,
         split: Literal["train", "val"],
         target_size: Tuple[int, int],
+        class_id_map: Dict[int, int],
         transformations: Optional[Callable] = None,
-        label_id_offset: int = 1,
     ) -> RoadSignRetinaNetDataset:
         """
         Build a dataset from ``data/{version}/{dataset_hash}/splits/{split_hash}/``.
@@ -353,8 +414,8 @@ class RoadSignRetinaNetDataset(Dataset):
         return cls(
             data_pairs=pairs,
             target_size=target_size,
+            class_id_map=class_id_map,
             transformations=transformations,
-            label_id_offset=label_id_offset,
             sample_ids=sample_ids,
         )
 
@@ -370,7 +431,7 @@ class RoadSignRetinaNetDataset(Dataset):
             Path(label_path),
             orig_w,
             orig_h,
-            self.label_id_offset,
+            self.class_id_map,
         )
 
         target: Dict[str, Any] = {
@@ -433,10 +494,10 @@ def build_retinanet_dataloaders(
     dataset_hash: str,
     split_hash: str,
     target_size: Tuple[int, int],
+    class_id_map: Dict[int, int],
     batch_size: int,
     train_transforms: Optional[Callable] = None,
     val_transforms: Optional[Callable] = None,
-    label_id_offset: int = 1,
     num_workers: int = 0,
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, Dict[str, Any]]:
     """
@@ -444,14 +505,16 @@ def build_retinanet_dataloaders(
     """
     from torch.utils.data import DataLoader
 
+    validated_map = validate_retinanet_class_id_map(class_id_map)
+
     train_ds = RoadSignRetinaNetDataset.from_split(
         version,
         dataset_hash,
         split_hash,
         split="train",
         target_size=target_size,
+        class_id_map=validated_map,
         transformations=train_transforms,
-        label_id_offset=label_id_offset,
     )
     val_ds = RoadSignRetinaNetDataset.from_split(
         version,
@@ -459,8 +522,8 @@ def build_retinanet_dataloaders(
         split_hash,
         split="val",
         target_size=target_size,
+        class_id_map=validated_map,
         transformations=val_transforms,
-        label_id_offset=label_id_offset,
     )
 
     train_loader = DataLoader(
@@ -485,9 +548,10 @@ def build_retinanet_dataloaders(
         "dataset_hash": dataset_hash,
         "split_hash": split_hash,
         "target_size": list(target_size),
-        "num_classes": road_sign_num_classes(version, dataset_hash),
+        "class_id_map": validated_map,
+        "num_foreground_classes": len(validated_map),
+        "num_classes": retinanet_num_classes(validated_map),
         "class_mapping": load_road_sign_class_mapping(version, dataset_hash),
-        "label_id_offset": label_id_offset,
         "train_size": len(train_ds),
         "val_size": len(val_ds),
         "dataset_config": load_dataset_config(version, dataset_hash),

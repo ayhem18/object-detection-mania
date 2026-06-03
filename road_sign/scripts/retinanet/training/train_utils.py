@@ -36,9 +36,13 @@ from home_made_od.retinanet.retinanet_detector import build_retinanet
 from home_made_od.retinanet.retinanet_train import train_retinanet_model
 from mypt.code_utils.pytorch_utils import seed_everything
 from road_sign.utils.data_utils import (
+    build_retinanet_class_id_map,
     build_retinanet_dataloaders,
     collect_train_box_dimensions_for_anchors,
     load_road_sign_class_mapping,
+    retinanet_cls_id_to_name,
+    retinanet_num_classes,
+    validate_retinanet_class_id_map,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,11 +80,26 @@ def build_retinanet_transforms(aug_config: Dict[str, Any], *, train: bool) -> v2
     return v2.Compose(transforms)
 
 
-def retinanet_cls_id_to_name(
+def normalize_class_id_map_config(raw: Dict[Any, Any]) -> Dict[int, int]:
+    """Parse ``class_id_map`` from a JSON/YAML config (keys may be strings)."""
+    return validate_retinanet_class_id_map({int(k): int(v) for k, v in raw.items()})
+
+
+def resolve_class_id_map(
+    config: Dict[str, Any],
     class_mapping: Dict[int, str],
-    label_id_offset: int = 1,
-) -> Dict[int, str]:
-    return {int(cls_id) + label_id_offset: name for cls_id, name in class_mapping.items()}
+) -> Dict[int, int]:
+    """
+    Resolve dataset → model label mapping from the training config.
+
+    If ``class_id_map`` is ``None``, builds a contiguous map from ``class_mapping``
+    using ``retinanet_label_start`` (default 1).
+    """
+    raw = config.get("class_id_map")
+    if raw is None:
+        start_index = int(config.get("retinanet_label_start", 1))
+        return build_retinanet_class_id_map(class_mapping, start_index=start_index)
+    return normalize_class_id_map_config(raw)
 
 
 def load_optional_patch_config(dataset_hash: str) -> Optional[Dict[str, Any]]:
@@ -153,7 +172,8 @@ def compute_experiment_hash(config: Dict[str, Any]) -> str:
         "train_params": config["train_params"],
         "model_params": config["model_params"],
         "augmentation": config["augmentation"],
-        "label_id_offset": config.get("label_id_offset", 1),
+        "class_id_map": config.get("class_id_map"),
+        "retinanet_label_start": config.get("retinanet_label_start", 1),
         "seed": config["seed"],
         "force_recompute_anchors": config.get("force_recompute_anchors", False),
     }
@@ -205,26 +225,27 @@ def run_retinanet_training(
         force=config.get("force_recompute_anchors", False),
     )
 
+    class_mapping = load_road_sign_class_mapping(version, dataset_hash)
+    class_id_map = resolve_class_id_map(config, class_mapping)
+    config["class_id_map"] = class_id_map
+
     train_params = config["train_params"]
     aug_config = config["augmentation"]
-    label_id_offset = int(config.get("label_id_offset", 1))
 
     train_loader, val_loader, meta = build_retinanet_dataloaders(
         version=version,
         dataset_hash=dataset_hash,
         split_hash=split_hash,
         target_size=target_size,
+        class_id_map=class_id_map,
         batch_size=train_params["batch_size"],
         train_transforms=build_retinanet_transforms(aug_config, train=True),
         val_transforms=build_retinanet_transforms(aug_config, train=False),
-        label_id_offset=label_id_offset,
         num_workers=train_params.get("num_workers", 0),
     )
 
-    num_foreground = meta["num_classes"]
-    num_classes = num_foreground + 1  # torchvision RetinaNet background at 0
-    class_mapping = meta["class_mapping"]
-    cls_id_2_cls_name = retinanet_cls_id_to_name(class_mapping, label_id_offset)
+    num_classes = retinanet_num_classes(class_id_map)
+    cls_id_2_cls_name = retinanet_cls_id_to_name(class_mapping, class_id_map)
 
     experiment_hash = compute_experiment_hash(config)
     artifact_dir = model_experiment_dir(
@@ -242,7 +263,8 @@ def run_retinanet_training(
         "artifact_dir": str(artifact_dir),
         "anchor_config_path": str(anchor_spec.config_path),
         "anchor_training_spec": anchor_spec.to_dict(),
-        "num_foreground_classes": num_foreground,
+        "class_id_map": class_id_map,
+        "num_foreground_classes": meta["num_foreground_classes"],
         "num_classes": num_classes,
         "train_size": meta["train_size"],
         "val_size": meta["val_size"],
