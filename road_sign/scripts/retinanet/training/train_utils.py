@@ -4,18 +4,16 @@ Shared RetinaNet training pipeline for road-sign datasets (resized / patch).
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict
 
 import torch
-import yaml
 from torchvision.transforms import v2
 
 from home_made_od.anchors.anchor_config_registry import (
-    AREA_BASED_ANCHOR_CONFIG,
+    DIMENSION_BASED_ANCHOR_CONFIG,
     recipe_to_payload,
 )
 from home_made_od.general.path_utils import (
@@ -23,16 +21,11 @@ from home_made_od.general.path_utils import (
     EXPERIMENT_CONFIG_FILENAME,
     RoadSignDatasetVersion,
     canonical_json_hash,
-    create_and_cache_split,
     load_dataset_config,
     model_experiment_dir,
     model_retinanet_anchor_config_path,
-    patch_config_path,
-    resolve_latest_dataset_hash,
-    resolve_latest_split_hash,
 )
 from home_made_od.retinanet.retinanet_anchors import compute_and_save_retinanet_anchors
-from home_made_od.retinanet.retinanet_detector import build_retinanet
 from home_made_od.retinanet.retinanet_train import train_retinanet_model
 from mypt.code_utils.pytorch_utils import seed_everything
 from road_sign.utils.data_utils import (
@@ -45,29 +38,56 @@ from road_sign.utils.data_utils import (
     validate_retinanet_class_id_map,
 )
 
+from script_utils import (
+    RETINANET_MODEL_NAME,
+    anchor_config_summary_payload,
+    build_retinanet_from_spec,
+    load_optional_patch_config,
+    read_anchor_level_metadata,
+    resolve_dataset_and_split,
+    resolve_target_size,
+)
+
 logger = logging.getLogger(__name__)
 
-RETINANET_MODEL_NAME = "retinanet"
-
-_ANCHOR_RECIPE = recipe_to_payload(AREA_BASED_ANCHOR_CONFIG)
+_ANCHOR_RECIPE = recipe_to_payload(DIMENSION_BASED_ANCHOR_CONFIG)
 DEFAULT_ANCHOR_CONFIG_HASH = _ANCHOR_RECIPE["config_hash"]
 DEFAULT_ANCHOR_METHOD = _ANCHOR_RECIPE["method"]
 DEFAULT_ANCHOR_METHOD_PARAMETERS = _ANCHOR_RECIPE["method_parameters"]
 
+DEFAULT_TRAIN_AUGMENTATION: Dict[str, Any] = {
+    "horizontal_flip_p": 0.5,
+    "vertical_flip_p": 0.5,
+    "color_jitter": {
+        "brightness": 0.2,
+        "contrast": 0.2,
+    },
+    "grayscale_p": 0.1,
+    "rotation_degrees": 30,
+    "rotation_p": 0.5,
+}
 
-def add_common_cli_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--dataset-hash", default=None, help="Latest for version if omitted.")
-    parser.add_argument("--split-hash", default=None, help="Latest split if omitted; created if none exist.")
-    parser.add_argument("--force-recompute-anchors", action="store_true")
-    parser.add_argument("--checkpoint", default=None, help="Resume from a full detector .pt checkpoint.")
+DEFAULT_TRAIN_PARAMS: Dict[str, Any] = {
+    "target_size": (512, 512),
+    "batch_size": 32,
+    "epochs": 200,
+    "learning_rate": 1e-4,
+    "early_stop_patience": 25,
+    "num_workers": 2,
+}
 
 
 def build_retinanet_transforms(aug_config: Dict[str, Any], *, train: bool) -> v2.Compose:
-    transforms: List[Any] = [v2.ToImage()]
+    transforms: list[Any] = [v2.ToImage()]
     if train:
-        transforms.append(
-            v2.RandomHorizontalFlip(p=aug_config.get("horizontal_flip_p", 0.5))
-        )
+        horizontal_flip_p = aug_config.get("horizontal_flip_p")
+        if horizontal_flip_p is not None:
+            transforms.append(v2.RandomHorizontalFlip(p=float(horizontal_flip_p)))
+
+        vertical_flip_p = aug_config.get("vertical_flip_p")
+        if vertical_flip_p is not None:
+            transforms.append(v2.RandomVerticalFlip(p=float(vertical_flip_p)))
+
         color_jitter = aug_config.get("color_jitter")
         if color_jitter:
             transforms.append(
@@ -76,6 +96,11 @@ def build_retinanet_transforms(aug_config: Dict[str, Any], *, train: bool) -> v2
                     contrast=color_jitter.get("contrast", 0.0),
                 )
             )
+
+        grayscale_p = aug_config.get("grayscale_p")
+        if grayscale_p is not None:
+            transforms.append(v2.RandomGrayscale(p=float(grayscale_p)))
+
         rotation_degrees = aug_config.get("rotation_degrees")
         if rotation_degrees is not None:
             transforms.append(
@@ -110,65 +135,6 @@ def resolve_class_id_map(
     return normalize_class_id_map_config(raw)
 
 
-def load_optional_patch_config(dataset_hash: str) -> Optional[Dict[str, Any]]:
-    path = patch_config_path(dataset_hash)
-    if not path.is_file():
-        return None
-    with open(path, encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
-
-
-def resolve_target_size(
-    config: Dict[str, Any],
-    version: RoadSignDatasetVersion,
-    dataset_hash: str,
-) -> Tuple[int, int]:
-    train_params = config["train_params"]
-    if "target_size" in train_params:
-        ts = train_params["target_size"]
-        return int(ts[0]), int(ts[1])
-
-    ds_cfg = load_dataset_config(version, dataset_hash)
-    if "target_size" in ds_cfg:
-        ts = ds_cfg["target_size"]
-        return int(ts[0]), int(ts[1])
-
-    if version == DATASET_VERSION_PATCH:
-        patch_cfg = load_optional_patch_config(dataset_hash)
-        if patch_cfg and "target_size" in patch_cfg:
-            ts = patch_cfg["target_size"]
-            return int(ts[0]), int(ts[1])
-
-    return 512, 512
-
-
-def resolve_dataset_and_split(
-    version: RoadSignDatasetVersion,
-    config: Dict[str, Any],
-) -> Tuple[str, str]:
-    dataset_hash = config.get("dataset_hash") or resolve_latest_dataset_hash(version)
-    if dataset_hash is None:
-        raise FileNotFoundError(
-            f"No dataset registered for version {version!r}. Run the data prep script first."
-        )
-
-    split_hash = config.get("split_hash") or resolve_latest_split_hash(version, dataset_hash)
-    if split_hash is None:
-        split_params = config["split_params"]
-        logger.info(
-            "No split found; creating split train_ratio=%s seed=%s",
-            split_params["train_ratio"],
-            split_params["seed"],
-        )
-        _, _, split_hash = create_and_cache_split(
-            version=version,
-            dataset_hash=dataset_hash,
-            train_ratio=split_params["train_ratio"],
-            seed=split_params["seed"],
-        )
-    return dataset_hash, split_hash
-
-
 def compute_experiment_hash(config: Dict[str, Any]) -> str:
     payload = {
         "model_name": RETINANET_MODEL_NAME,
@@ -183,7 +149,7 @@ def compute_experiment_hash(config: Dict[str, Any]) -> str:
         "class_id_map": config.get("class_id_map"),
         "retinanet_label_start": config.get("retinanet_label_start", 1),
         "seed": config["seed"],
-        "force_recompute_anchors": config.get("force_recompute_anchors", False),
+        "force_recompute_anchors": config.get("force_recompute_anchors", True),
     }
     if config.get("patch_config") is not None:
         payload["patch_config"] = config["patch_config"]
@@ -208,7 +174,7 @@ def run_retinanet_training(
     if version == DATASET_VERSION_PATCH:
         config["patch_config"] = load_optional_patch_config(dataset_hash)
 
-    target_size = resolve_target_size(config, version, dataset_hash)
+    target_size = resolve_target_size(version, dataset_hash, train_config=config)
     config["train_params"]["target_size"] = list(target_size)
 
     box_dimensions = collect_train_box_dimensions_for_anchors(
@@ -230,7 +196,7 @@ def run_retinanet_training(
         method_parameters=config.get(
             "anchor_method_parameters", DEFAULT_ANCHOR_METHOD_PARAMETERS
         ),
-        force=config.get("force_recompute_anchors", False),
+        force=config.get("force_recompute_anchors", True),
     )
 
     class_mapping = load_road_sign_class_mapping(version, dataset_hash)
@@ -271,6 +237,7 @@ def run_retinanet_training(
         "artifact_dir": str(artifact_dir),
         "anchor_config_path": str(anchor_spec.config_path),
         "anchor_training_spec": anchor_spec.to_dict(),
+        "anchor_config": anchor_config_summary_payload(anchor_spec),
         "class_id_map": class_id_map,
         "num_foreground_classes": meta["num_foreground_classes"],
         "num_classes": num_classes,
@@ -281,8 +248,8 @@ def run_retinanet_training(
         json.dump(run_record, handle, indent=4, ensure_ascii=False)
 
     model_params = config["model_params"]
-    model = build_retinanet(
-        anchor_spec=anchor_spec,
+    model = build_retinanet_from_spec(
+        anchor_spec,
         num_classes=num_classes,
         img_size=target_size,
         device=device,
@@ -290,10 +257,17 @@ def run_retinanet_training(
         freeze_backbone_layers=model_params.get("freeze_backbone_layers", 2),
     )
 
+    anchor_meta = read_anchor_level_metadata(anchor_spec)
     logger.info("Device: %s", device)
     logger.info("Dataset: %s / %s", version, dataset_hash)
     logger.info("Split: %s | train=%d val=%d", split_hash, meta["train_size"], meta["val_size"])
     logger.info("Anchors: %s (%s)", anchor_spec.config_path, anchor_spec.config_hash)
+    logger.info(
+        "FPN levels: requested=%s used=%s added=%s",
+        anchor_meta["requested_fpn_levels"],
+        anchor_meta["used_fpn_levels"],
+        anchor_meta["added_fpn_levels"],
+    )
     logger.info("Experiment: %s -> %s", experiment_hash, artifact_dir)
 
     train_retinanet_model(
@@ -305,7 +279,10 @@ def run_retinanet_training(
         artifact_dir=str(artifact_dir),
         device=device,
         cls_id_2_cls_name=cls_id_2_cls_name,
-        patience=train_params.get("early_stop_patience", 15),
+        patience=train_params.get(
+            "early_stop_patience", DEFAULT_TRAIN_PARAMS["early_stop_patience"]
+        ),
         anchor_spec=anchor_spec,
     )
     return artifact_dir
+

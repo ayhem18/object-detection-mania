@@ -32,25 +32,24 @@ import numpy as np
 import torch
 from torchvision.transforms import v2
 
-_current = Path(__file__).resolve().parent
-while _current != _current.parent:
-    if (_current / "road_sign").is_dir() and (_current / "home_made_od").is_dir():
-        if str(_current) not in sys.path:
-            sys.path.insert(0, str(_current))
-        break
-    _current = _current.parent
-else:
-    raise RuntimeError("Could not find monorepo root (road_sign + home_made_od).")
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from script_utils import (  # noqa: E402
+    VERSION_CHOICES,
+    add_monorepo_to_sys_path,
+    resolve_dataset_versions,
+    resolve_split_hash,
+    resolve_target_size,
+    retinanet_artifact_dir,
+)
+
+add_monorepo_to_sys_path()
 
 from home_made_od.general.path_utils import (  # noqa: E402
-    DATASET_VERSION_PATCH,
-    DATASET_VERSION_RESIZED,
     RoadSignDatasetVersion,
-    load_dataset_config,
-    patch_config_path,
     resolve_latest_dataset_hash,
-    resolve_latest_split_hash,
-    road_sign_artifacts_root,
 )
 from mypt.code_utils.pytorch_utils import seed_everything  # noqa: E402
 from road_sign.utils.data_utils import (  # noqa: E402
@@ -61,13 +60,6 @@ from road_sign.utils.data_utils import (  # noqa: E402
 )
 
 logger = logging.getLogger(__name__)
-
-RETINANET_MODEL_NAME = "retinanet"
-VERSION_CHOICES: List[RoadSignDatasetVersion] = [
-    DATASET_VERSION_RESIZED,
-    DATASET_VERSION_PATCH,
-]
-DEFAULT_DATASET_VERSIONS = list(VERSION_CHOICES)
 
 # Match patch training defaults in train_patch.py
 DEFAULT_COLOR_JITTER = {"brightness": 0.2, "contrast": 0.2}
@@ -100,55 +92,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_dataset_versions(args: argparse.Namespace) -> List[RoadSignDatasetVersion]:
-    if args.dataset_version is not None:
-        return [args.dataset_version]
-    return list(DEFAULT_DATASET_VERSIONS)
-
-
-def resolve_target_size(
-    args: argparse.Namespace,
-    version: RoadSignDatasetVersion,
-    dataset_hash: str,
-) -> Tuple[int, int]:
-    if args.target_size is not None:
-        return int(args.target_size[0]), int(args.target_size[1])
-    config = load_dataset_config(version, dataset_hash)
-    if "target_size" in config:
-        ts = config["target_size"]
-        return int(ts[0]), int(ts[1])
-    if version == DATASET_VERSION_PATCH:
-        ppath = patch_config_path(dataset_hash)
-        if ppath.is_file():
-            import yaml
-
-            with open(ppath, encoding="utf-8") as handle:
-                patch_cfg = yaml.safe_load(handle)
-            if patch_cfg and "target_size" in patch_cfg:
-                ts = patch_cfg["target_size"]
-                return int(ts[0]), int(ts[1])
-    return 512, 512
-
-
 def resolve_output_dir(
     version: RoadSignDatasetVersion,
     dataset_hash: str,
     split_hash: str,
     override: Optional[str],
 ) -> Path:
-    if override:
-        path = Path(override) / version / dataset_hash / split_hash
-    else:
-        path = (
-            road_sign_artifacts_root()
-            / RETINANET_MODEL_NAME
-            / "augmentation_sa"
-            / version
-            / dataset_hash
-            / split_hash
-        )
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return retinanet_artifact_dir(
+        "augmentation_sa",
+        version,
+        dataset_hash,
+        split_hash,
+        output_dir_override=override,
+        mkdir=True,
+    )
 
 
 def build_augmentation_presets(
@@ -332,13 +289,19 @@ def main() -> None:
             failures.append(f"No dataset for {version!r}")
             continue
 
-        split_hash = args.split_hash or resolve_latest_split_hash(version, dataset_hash)
+        split_hash = resolve_split_hash(
+            version, dataset_hash, args.split_hash, create_if_missing=False
+        )
         if split_hash is None:
             failures.append(f"No split for {version}/{dataset_hash}")
             continue
 
         try:
-            target_size = resolve_target_size(args, version, dataset_hash)
+            target_size = resolve_target_size(
+                version,
+                dataset_hash,
+                cli_target_size=args.target_size,
+            )
             class_mapping = load_road_sign_class_mapping(version, dataset_hash)
             class_id_map = build_retinanet_class_id_map(
                 class_mapping, start_index=args.retinanet_label_start

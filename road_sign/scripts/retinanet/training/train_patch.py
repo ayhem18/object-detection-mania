@@ -14,31 +14,30 @@ Run from the monorepo root::
 
 from __future__ import annotations
 
-import sys
 import argparse
+import copy
 import logging
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from home_made_od.general.path_utils import DATASET_VERSION_PATCH
-
-_current = Path(__file__).resolve().parent
-while _current != _current.parent:
-    if (_current / "road_sign").is_dir() and (_current / "home_made_od").is_dir():
-        if str(_current) not in sys.path:
-            sys.path.insert(0, str(_current))
-        _training_dir = Path(__file__).resolve().parent
-        if str(_training_dir) not in sys.path:
-            sys.path.insert(0, str(_training_dir))
-        break
-    _current = _current.parent
-else:
-    raise RuntimeError("Could not find monorepo root (road_sign + home_made_od).")
-
-from train_utils import ( 
-    DEFAULT_ANCHOR_CONFIG_HASH,
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from script_utils import (  # noqa: E402
     add_common_cli_args,
+    add_monorepo_to_sys_path,
+    add_training_dir_to_sys_path,
+)
+
+add_training_dir_to_sys_path(__file__)
+add_monorepo_to_sys_path()
+
+from home_made_od.general.path_utils import DATASET_VERSION_PATCH  # noqa: E402
+
+from train_utils import (  # noqa: E402
+    DEFAULT_ANCHOR_CONFIG_HASH,
+    DEFAULT_TRAIN_AUGMENTATION,
+    DEFAULT_TRAIN_PARAMS,
     run_retinanet_training,
 )
 
@@ -55,30 +54,15 @@ DEFAULT_CONFIG: dict = {
         "train_ratio": 0.9,
         "seed": 42,
     },
-    "train_params": {
-        "target_size": (512, 512),
-        "batch_size": 32,
-        "epochs": 50,
-        "learning_rate": 1e-4,
-        "early_stop_patience": 15,
-        "num_workers": 2,
-    },
+    "train_params": dict(DEFAULT_TRAIN_PARAMS),
     "model_params": {
         "freeze_backbone_layers": 2,
     },
-    "augmentation": {
-        "horizontal_flip_p": 0.5,
-        "color_jitter": {
-            "brightness": 0.2,
-            "contrast": 0.2,
-        },
-        "rotation_degrees": 30,
-        "rotation_p": 0.5,
-    },
+    "augmentation": copy.deepcopy(DEFAULT_TRAIN_AUGMENTATION),
     "class_id_map": None,
     "retinanet_label_start": 1,
     "seed": 42,
-    "force_recompute_anchors": False,
+    "force_recompute_anchors": True,
     "checkpoint_path": None,
 }
 
@@ -98,8 +82,7 @@ def apply_cli_overrides(config: dict, args: argparse.Namespace) -> None:
         config["dataset_hash"] = args.dataset_hash
     if args.split_hash:
         config["split_hash"] = args.split_hash
-    if args.force_recompute_anchors:
-        config["force_recompute_anchors"] = True
+    config["force_recompute_anchors"] = args.force_recompute_anchors
     if args.checkpoint:
         config["checkpoint_path"] = args.checkpoint
     if args.batch_size is not None:
@@ -120,7 +103,7 @@ def main() -> None:
     config["train_params"] = dict(DEFAULT_CONFIG["train_params"])
     config["split_params"] = dict(DEFAULT_CONFIG["split_params"])
     config["model_params"] = dict(DEFAULT_CONFIG["model_params"])
-    config["augmentation"] = dict(DEFAULT_CONFIG["augmentation"])
+    config["augmentation"] = copy.deepcopy(DEFAULT_CONFIG["augmentation"])
     apply_cli_overrides(config, args)
 
     artifact_dir = run_retinanet_training(DATASET_VERSION_PATCH, config)

@@ -24,18 +24,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
-import yaml
 from tqdm import tqdm
 
-_current = Path(__file__).resolve().parent
-while _current != _current.parent:
-    if (_current / "road_sign").is_dir() and (_current / "home_made_od").is_dir():
-        if str(_current) not in sys.path:
-            sys.path.insert(0, str(_current))
-        break
-    _current = _current.parent
-else:
-    raise RuntimeError("Could not find monorepo root (road_sign + home_made_od).")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from script_utils import (  # noqa: E402
+    RETINANET_MODEL_NAME,
+    VERSION_CHOICES,
+    add_monorepo_to_sys_path,
+    anchor_config_summary_payload,
+    build_retinanet_from_spec,
+    read_anchor_level_metadata,
+    resolve_dataset_versions,
+    resolve_split_hash,
+    resolve_target_size,
+    retinanet_artifact_dir,
+)
+
+add_monorepo_to_sys_path()
 
 from home_made_od.anchors.anchor_computation_strategies import (  # noqa: E402
     assign_to_level_by_area,
@@ -56,22 +61,14 @@ from home_made_od.anchors.anchor_evaluation import (  # noqa: E402
     format_anchor_evaluation_report,
 )
 from home_made_od.general.path_utils import (  # noqa: E402
-    DATASET_VERSION_PATCH,
-    DATASET_VERSION_RESIZED,
     RoadSignDatasetVersion,
-    create_and_cache_split,
-    load_dataset_config,
-    patch_config_path,
     resolve_latest_dataset_hash,
-    resolve_latest_split_hash,
-    road_sign_artifacts_root,
 )
 from home_made_od.retinanet.error_analysis import build_retinanet_grid_layout  # noqa: E402
 from home_made_od.retinanet.retinanet_anchors import (  # noqa: E402
     AnchorTrainingSpec,
     compute_and_save_retinanet_anchors,
 )
-from home_made_od.retinanet.retinanet_detector import build_retinanet  # noqa: E402
 from mypt.code_utils.pytorch_utils import seed_everything  # noqa: E402
 from road_sign.utils.data_utils import (  # noqa: E402
     RoadSignRetinaNetDataset,
@@ -82,13 +79,6 @@ from road_sign.utils.data_utils import (  # noqa: E402
 )
 
 logger = logging.getLogger(__name__)
-
-RETINANET_MODEL_NAME = "retinanet"
-VERSION_CHOICES: List[RoadSignDatasetVersion] = [
-    DATASET_VERSION_RESIZED,
-    DATASET_VERSION_PATCH,
-]
-DEFAULT_DATASET_VERSIONS = list(VERSION_CHOICES)
 
 DEFAULT_ANCHOR_CONFIG_HASHES: List[str] = [
     recipe_to_payload(recipe)["config_hash"]
@@ -114,7 +104,12 @@ def parse_args() -> argparse.Namespace:
         help="Registered recipe hash(es); default: all registered recipes.",
     )
     parser.add_argument("--output-dir", default=None, help="Override artifact root.")
-    parser.add_argument("--force-recompute-anchors", action="store_true")
+    parser.add_argument(
+        "--force-recompute-anchors",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Recompute anchors even when anchor_config.json exists (default: true).",
+    )
     parser.add_argument("--fg-iou-thresh", type=float, default=0.5)
     parser.add_argument("--bbox-level-iou-threshold", type=float, default=0.5)
     parser.add_argument("--background-iou-threshold", type=float, default=0.4)
@@ -130,63 +125,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_dataset_versions(args: argparse.Namespace) -> List[RoadSignDatasetVersion]:
-    if args.dataset_versions:
-        return list(args.dataset_versions)
-    return list(DEFAULT_DATASET_VERSIONS)
-
-
-def load_optional_patch_config(dataset_hash: str) -> Optional[Dict[str, Any]]:
-    path = patch_config_path(dataset_hash)
-    if not path.is_file():
-        return None
-    with open(path, encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
-
-
-def resolve_target_size(
-    version: RoadSignDatasetVersion,
-    dataset_hash: str,
-) -> Tuple[int, int]:
-    ds_cfg = load_dataset_config(version, dataset_hash)
-    if "target_size" in ds_cfg:
-        ts = ds_cfg["target_size"]
-        return int(ts[0]), int(ts[1])
-
-    if version == DATASET_VERSION_PATCH:
-        patch_cfg = load_optional_patch_config(dataset_hash)
-        if patch_cfg and "target_size" in patch_cfg:
-            ts = patch_cfg["target_size"]
-            return int(ts[0]), int(ts[1])
-
-    return 512, 512
-
-
-def resolve_split_hash(
-    version: RoadSignDatasetVersion,
-    dataset_hash: str,
-    split_hash: Optional[str],
-    *,
-    train_ratio: float,
-    seed: int,
-) -> str:
-    resolved = split_hash or resolve_latest_split_hash(version, dataset_hash)
-    if resolved is not None:
-        return resolved
-    logger.info(
-        "No split found; creating split train_ratio=%s seed=%s",
-        train_ratio,
-        seed,
-    )
-    _, _, created = create_and_cache_split(
-        version=version,
-        dataset_hash=dataset_hash,
-        train_ratio=train_ratio,
-        seed=seed,
-    )
-    return created
-
-
 def anchor_matching_output_dir(
     version: RoadSignDatasetVersion,
     dataset_hash: str,
@@ -194,16 +132,13 @@ def anchor_matching_output_dir(
     config_hash: str,
     output_dir_override: Optional[str] = None,
 ) -> Path:
-    if output_dir_override:
-        return Path(output_dir_override) / version / dataset_hash / split_hash / config_hash
-    return (
-        road_sign_artifacts_root()
-        / RETINANET_MODEL_NAME
-        / "anchor_matching_sa"
-        / version
-        / dataset_hash
-        / split_hash
-        / config_hash
+    return retinanet_artifact_dir(
+        "anchor_matching_sa",
+        version,
+        dataset_hash,
+        split_hash,
+        config_hash,
+        output_dir_override=output_dir_override,
     )
 
 
@@ -281,18 +216,11 @@ def extract_model_anchors_and_grid(
     device: torch.device,
 ) -> Tuple[torch.nn.Module, torch.Tensor, list, list]:
     """Build RetinaNet; return model, flat anchors, prior_to_cell, level_grids."""
-    used_levels = list(anchor_spec.used_fpn_levels)
-    anchor_config_path = anchor_spec.config_path
+    meta = read_anchor_level_metadata(anchor_spec)
+    used_levels = meta["used_fpn_levels"]
 
-    logger.info(
-        "Building RetinaNet (%s): levels=%s from %s",
-        anchor_spec.method,
-        used_levels,
-        anchor_config_path,
-    )
-
-    model = build_retinanet(
-        anchor_spec=anchor_spec,
+    model = build_retinanet_from_spec(
+        anchor_spec,
         num_classes=num_classes,
         img_size=img_size,
         device=device,
@@ -300,7 +228,6 @@ def extract_model_anchors_and_grid(
     model.eval()
 
     raw_image = torch.zeros((3, img_size[0], img_size[1]), dtype=torch.float32)
-    level_ids = used_levels
 
     with torch.no_grad():
         images, _ = model.transform([raw_image], None)
@@ -311,21 +238,17 @@ def extract_model_anchors_and_grid(
         img_h, img_w = images.tensors.shape[-2:]
         features = list(model.backbone(images.tensors).values())
         if len(features) != len(used_levels):
-            if len(features) < len(used_levels):
-                raise ValueError(
-                    f"Backbone produced {len(features)} feature maps but "
-                    f"anchor config has {len(used_levels)} levels {used_levels}."
-                )
-            logger.warning(
-                "Truncating %d backbone feature maps to %d manifest levels %s",
-                len(features),
-                len(used_levels),
-                used_levels,
+            raise ValueError(
+                f"Backbone produced {len(features)} feature maps but "
+                f"anchor config has {len(used_levels)} levels {used_levels}."
             )
-            features = features[: len(used_levels)]
         anchors_list = model.anchor_generator(images, features)
         prior_to_cell, level_grids = build_retinanet_grid_layout(
-            model, img_h, img_w, features, level_ids=level_ids
+            model,
+            img_h,
+            img_w,
+            features,
+            level_ids=used_levels,
         )
 
     n_anchors = anchors_list[0].shape[0]
@@ -423,6 +346,11 @@ def run_single_anchor_config(
     print(f"GT Boxes:      {candidates.num_boxes}")
     print(f"Config Dir:    {config_dir}")
     print(f"Image Size:    {target_size} | Anchors: {all_anchors.shape[0]}")
+    anchor_meta = read_anchor_level_metadata(anchor_spec)
+    print(f"Requested FPN: {anchor_meta['requested_fpn_levels']}")
+    print(f"Used FPN:      {anchor_meta['used_fpn_levels']}")
+    if anchor_meta["added_fpn_levels"]:
+        print(f"Added levels:  {anchor_meta['added_fpn_levels']}")
     print(
         f"Test 2 thresholds: recall>={eval_kwargs['metric_threshold']}, "
         f"gt_pass_fraction>={eval_kwargs['min_gt_threshold_ratio']}, "
@@ -444,8 +372,12 @@ def run_single_anchor_config(
     print("\n" + format_anchor_evaluation_report(eval_report))
 
     summary_path = config_dir / "summary.json"
+    summary_payload = {
+        **eval_report.to_dict(),
+        "anchor_config": anchor_config_summary_payload(anchor_spec, config_hash=config_hash),
+    }
     with open(summary_path, "w", encoding="utf-8") as handle:
-        json.dump(eval_report.to_dict(), handle, indent=2)
+        json.dump(summary_payload, handle, indent=2)
     logger.info("Wrote summary: %s", summary_path)
 
 
@@ -480,7 +412,7 @@ def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
 
-    versions = resolve_dataset_versions(args)
+    versions = resolve_dataset_versions(args, multi_attr="dataset_versions")
     anchor_config_hashes = args.anchor_config_hashes or DEFAULT_ANCHOR_CONFIG_HASHES
     eval_kwargs = {
         "fg_iou_threshold": args.fg_iou_thresh,
@@ -514,6 +446,7 @@ def main() -> None:
                 args.split_hash,
                 train_ratio=args.train_ratio,
                 seed=args.split_seed,
+                create_if_missing=True,
             )
             target_size = resolve_target_size(version, dataset_hash)
             class_mapping = load_road_sign_class_mapping(version, dataset_hash)
