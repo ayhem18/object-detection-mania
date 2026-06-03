@@ -1,0 +1,1263 @@
+{
+  "none": {
+    "status": "error",
+    "input_layers": [],
+    "uses_extra_block": false,
+    "error_type": "ValueError",
+    "error": "min() arg is an empty sequence"
+  },
+  "1": {
+    "status": "ok",
+    "input_layers": [
+      1
+    ],
+    "body_returned_layers": [
+      1
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      2
+    ],
+    "output_strides": [
+      4,
+      8
+    ]
+  },
+  "2": {
+    "status": "ok",
+    "input_layers": [
+      2
+    ],
+    "body_returned_layers": [
+      2
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      2,
+      3
+    ],
+    "output_strides": [
+      8,
+      16
+    ]
+  },
+  "3": {
+    "status": "ok",
+    "input_layers": [
+      3
+    ],
+    "body_returned_layers": [
+      3
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      3,
+      4
+    ],
+    "output_strides": [
+      16,
+      32
+    ]
+  },
+  "4": {
+    "status": "ok",
+    "input_layers": [
+      4
+    ],
+    "body_returned_layers": [
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      4,
+      5
+    ],
+    "output_strides": [
+      32,
+      64
+    ]
+  },
+  "5": {
+    "status": "error",
+    "input_layers": [
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "ValueError",
+    "error": "min() arg is an empty sequence"
+  },
+  "6": {
+    "status": "error",
+    "input_layers": [
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "ValueError",
+    "error": "min() arg is an empty sequence"
+  },
+  "1,2": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2
+    ],
+    "body_returned_layers": [
+      1,
+      2
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      2,
+      3
+    ],
+    "output_strides": [
+      4,
+      8,
+      16
+    ]
+  },
+  "1,3": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      3
+    ],
+    "body_returned_layers": [
+      1,
+      3
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      3,
+      4
+    ],
+    "output_strides": [
+      4,
+      16,
+      32
+    ]
+  },
+  "1,4": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      4
+    ],
+    "body_returned_layers": [
+      1,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      4,
+      5
+    ],
+    "output_strides": [
+      4,
+      32,
+      64
+    ]
+  },
+  "1,5": {
+    "status": "error",
+    "input_layers": [
+      1,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 256, 128, 128] to have 2048 channels, but got 256 channels instead"
+  },
+  "1,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 256, 128, 128] to have 2048 channels, but got 256 channels instead"
+  },
+  "2,3": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      3
+    ],
+    "body_returned_layers": [
+      2,
+      3
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      2,
+      3,
+      4
+    ],
+    "output_strides": [
+      8,
+      16,
+      32
+    ]
+  },
+  "2,4": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      4
+    ],
+    "body_returned_layers": [
+      2,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      2,
+      4,
+      5
+    ],
+    "output_strides": [
+      8,
+      32,
+      64
+    ]
+  },
+  "2,5": {
+    "status": "error",
+    "input_layers": [
+      2,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 512, 64, 64] to have 2048 channels, but got 512 channels instead"
+  },
+  "2,6": {
+    "status": "error",
+    "input_layers": [
+      2,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 512, 64, 64] to have 2048 channels, but got 512 channels instead"
+  },
+  "3,4": {
+    "status": "ok",
+    "input_layers": [
+      3,
+      4
+    ],
+    "body_returned_layers": [
+      3,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      3,
+      4,
+      5
+    ],
+    "output_strides": [
+      16,
+      32,
+      64
+    ]
+  },
+  "3,5": {
+    "status": "error",
+    "input_layers": [
+      3,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "3,6": {
+    "status": "error",
+    "input_layers": [
+      3,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "4,5": {
+    "status": "ok",
+    "input_layers": [
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      32,
+      64,
+      128
+    ]
+  },
+  "4,6": {
+    "status": "ok",
+    "input_layers": [
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      32,
+      64,
+      128
+    ]
+  },
+  "5,6": {
+    "status": "error",
+    "input_layers": [
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "ValueError",
+    "error": "min() arg is an empty sequence"
+  },
+  "1,2,3": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      3
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      3
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "output_strides": [
+      4,
+      8,
+      16,
+      32
+    ]
+  },
+  "1,2,4": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      4
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      2,
+      4,
+      5
+    ],
+    "output_strides": [
+      4,
+      8,
+      32,
+      64
+    ]
+  },
+  "1,2,5": {
+    "status": "error",
+    "input_layers": [
+      1,
+      2,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 512, 64, 64] to have 2048 channels, but got 512 channels instead"
+  },
+  "1,2,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      2,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 512, 64, 64] to have 2048 channels, but got 512 channels instead"
+  },
+  "1,3,4": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      3,
+      4
+    ],
+    "body_returned_layers": [
+      1,
+      3,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "output_strides": [
+      4,
+      16,
+      32,
+      64
+    ]
+  },
+  "1,3,5": {
+    "status": "error",
+    "input_layers": [
+      1,
+      3,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "1,3,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      3,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "1,4,5": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      1,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,4,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,5,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 256, 128, 128] to have 2048 channels, but got 256 channels instead"
+  },
+  "2,3,4": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      3,
+      4
+    ],
+    "body_returned_layers": [
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "output_strides": [
+      8,
+      16,
+      32,
+      64
+    ]
+  },
+  "2,3,5": {
+    "status": "error",
+    "input_layers": [
+      2,
+      3,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "2,3,6": {
+    "status": "error",
+    "input_layers": [
+      2,
+      3,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "2,4,5": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      2,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      2,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      8,
+      32,
+      64,
+      128
+    ]
+  },
+  "2,4,6": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      2,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      2,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      8,
+      32,
+      64,
+      128
+    ]
+  },
+  "2,5,6": {
+    "status": "error",
+    "input_layers": [
+      2,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 512, 64, 64] to have 2048 channels, but got 512 channels instead"
+  },
+  "3,4,5": {
+    "status": "ok",
+    "input_layers": [
+      3,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "3,4,6": {
+    "status": "ok",
+    "input_layers": [
+      3,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "3,5,6": {
+    "status": "error",
+    "input_layers": [
+      3,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,3,4": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": false,
+    "output_layers": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "output_strides": [
+      4,
+      8,
+      16,
+      32,
+      64
+    ]
+  },
+  "1,2,3,5": {
+    "status": "error",
+    "input_layers": [
+      1,
+      2,
+      3,
+      5
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "1,2,3,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      2,
+      3,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "1,2,4,5": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      2,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      8,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,4,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      2,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      8,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,5,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      2,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 512, 64, 64] to have 2048 channels, but got 512 channels instead"
+  },
+  "1,3,4,5": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      1,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,3,4,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      3,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,3,5,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      3,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "1,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      32,
+      64,
+      128
+    ]
+  },
+  "2,3,4,5": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      8,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "2,3,4,6": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      3,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      8,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "2,3,5,6": {
+    "status": "error",
+    "input_layers": [
+      2,
+      3,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "2,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      2,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      2,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      8,
+      32,
+      64,
+      128
+    ]
+  },
+  "3,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,3,4,5": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      8,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,3,4,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      3,
+      4,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      8,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,3,5,6": {
+    "status": "error",
+    "input_layers": [
+      1,
+      2,
+      3,
+      5,
+      6
+    ],
+    "uses_extra_block": true,
+    "error_type": "RuntimeError",
+    "error": "Given groups=1, weight of size [256, 2048, 3, 3], expected input[1, 1024, 32, 32] to have 2048 channels, but got 1024 channels instead"
+  },
+  "1,2,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      2,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      8,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,3,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "2,3,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      8,
+      16,
+      32,
+      64,
+      128
+    ]
+  },
+  "1,2,3,4,5,6": {
+    "status": "ok",
+    "input_layers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "body_returned_layers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "uses_extra_block": true,
+    "output_layers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "output_strides": [
+      4,
+      8,
+      16,
+      32,
+      64,
+      128
+    ]
+  }
+}

@@ -14,9 +14,9 @@ Run from the monorepo root::
 
 from __future__ import annotations
 
+import sys
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -72,6 +72,8 @@ DEFAULT_CONFIG: dict = {
             "brightness": 0.2,
             "contrast": 0.2,
         },
+        "rotation_degrees": 30,
+        "rotation_p": 0.5,
     },
     "class_id_map": None,
     "retinanet_label_start": 1,

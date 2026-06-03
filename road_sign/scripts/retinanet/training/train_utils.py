@@ -76,6 +76,14 @@ def build_retinanet_transforms(aug_config: Dict[str, Any], *, train: bool) -> v2
                     contrast=color_jitter.get("contrast", 0.0),
                 )
             )
+        rotation_degrees = aug_config.get("rotation_degrees")
+        if rotation_degrees is not None:
+            transforms.append(
+                v2.RandomApply(
+                    [v2.RandomRotation(degrees=float(rotation_degrees))],
+                    p=aug_config.get("rotation_p", 0.5),
+                )
+            )
     transforms.append(v2.ToDtype(torch.float32, scale=True))
     return v2.Compose(transforms)
 

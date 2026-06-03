@@ -1,7 +1,7 @@
+from home_made_od.od_metrics.grid_metrics import ReferenceCellAssignment
 from home_made_od.retinanet.error_analysis.retinanet_grid_index import (
-    PriorCellAssignment,
-    ReferenceCellAssignment,
     build_retinanet_grid_layout,
+    level_ids_from_anchor_config,
     level_ids_from_manifest,
     verify_anchor_cell_count,
 )
@@ -15,7 +15,6 @@ from home_made_od.retinanet.error_analysis.retinanet_obj_ea import (
 )
 
 __all__ = [
-    "PriorCellAssignment",
     "ReferenceCellAssignment",
     "build_retinanet_grid_layout",
     "level_ids_from_manifest",

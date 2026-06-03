@@ -5,8 +5,8 @@ FPN / backbone gotchas (torchvision + anchor manifest coupling)
 -----------------------------------------------------------------
 The anchor manifest ``used_fpn_levels`` drives which FPN levels the detector
 uses, but several torchvision constraints force implicit backbone changes.
-See :func:`dl_lib.etalon_object_detection.modules.retinanet.retinanet_anchors.retinanet_returned_layers`
-and :func:`_build_fpn_backbone` for the mapping logic; regression coverage lives in ``tests/retinanet/test_retinanet_building.py``.
+See :func:`home_made_od.retinanet.retinanet_anchors.retinanet_returned_layers`
+and :func:`_build_fpn_backbone` for the mapping logic; regression coverage lives in ``tests/retinanet/test_architecture_building.py``.
 
 **Level naming and strides**
 
@@ -17,8 +17,8 @@ and :func:`_build_fpn_backbone` for the mapping logic; regression coverage lives
   backbone feature (2048 channels, stride 32).
 
 **P3 implies P2**
-
 If P3 is requested, ``layer2`` must be extracted from the backbone. Torchvision
+
 FPN cannot build a valid pyramid from ``layer2`` alone — ``layer1`` (P2) is
 always added to ``returned_layers`` even when P2 is absent from the manifest.
 The backbone therefore emits a P2 feature map that may not have matching anchors.
@@ -95,7 +95,6 @@ DEFAULT_IMAGE_STD: Tuple[float, float, float] = (0.229, 0.224, 0.225)
 FULLY_TRAINABLE_BACKBONE_LAYERS = 5
 
 _OUT_CHANNELS = RESNET_OUT_CHANNELS
-_returned_layers = retinanet_returned_layers
 
 
 def _normalize_img_size(img_size: Union[int, Tuple[int, int]]) -> Tuple[int, int]:
@@ -112,7 +111,7 @@ def _build_fpn_backbone(
 ) -> nn.Module:
     """ResNet50 + FPN for the FPN levels listed in the anchor config."""
     body = resnet50(weights=None)
-    returned_layers = _returned_layers(used_levels)
+    returned_layers = retinanet_returned_layers(used_levels)
     needs_p6p7 = "P6" in used_levels or "P7" in used_levels
 
     if needs_p6p7:
@@ -138,8 +137,7 @@ def _assemble_retinanet(
     num_classes: int,
     img_size: Tuple[int, int],
     mean: Sequence[float],
-    std: Sequence[float],
-) -> RetinaNet:
+    std: Sequence[float],) -> RetinaNet:
     """
     Wire FPN backbone, anchor generator, and detection head.
 
@@ -193,8 +191,7 @@ def build_retinanet(
     trainable_backbone_layers: int = FULLY_TRAINABLE_BACKBONE_LAYERS,
     mean: Sequence[float] | None = None,
     std: Sequence[float] | None = None,
-    anchor_generator: AnchorGenerator | None = None,
-) -> RetinaNet:
+    anchor_generator: AnchorGenerator | None = None,) -> RetinaNet:
     """
     Build RetinaNet with anchors from ``anchor_spec`` and optional weights.
 
