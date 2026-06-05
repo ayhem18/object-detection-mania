@@ -15,6 +15,7 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import ops
 from torchvision.transforms import v2
+from tqdm import tqdm
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def generate_sliding_window_metadata(
     metadata: List[PatchMeta] = []
     scales = [int(s) for s in patch_scales]
 
-    for img_path in image_paths:
+    for img_path in tqdm(image_paths, desc="Generating sliding window metadata"):
         img_path_str = str(img_path)
         probe = cv2.imread(img_path_str)
         if probe is None:
@@ -139,13 +140,15 @@ def prepare_patches_offline(
     for meta in all_metadata:
         by_image.setdefault(meta.img_path, []).append(meta)
 
+    print(f"Extracting {len(all_metadata)} patches using multiprocessing...")
+
     tasks = [
         (img_path, patches, str(tmp_patch_dir), target_size)
         for img_path, patches in by_image.items()
     ]
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-        list(executor.map(_extract_and_save_patches, tasks))
+        list(tqdm(executor.map(_extract_and_save_patches, tasks), total=len(tasks), desc="Extracting patches"))
 
     return all_metadata
 

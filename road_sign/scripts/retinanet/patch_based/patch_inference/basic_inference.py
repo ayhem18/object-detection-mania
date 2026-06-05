@@ -99,8 +99,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-csv", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--conf-thresh", type=float, default=0.05)
-    parser.add_argument("--nms-thresh", type=float, default=0.4)
+    parser.add_argument("--conf-thresh", type=float, default=0.4)
+    parser.add_argument("--nms-thresh", type=float, default=0.3)
     parser.add_argument(
         "--patch-nms-thresh",
         type=float,
