@@ -9,7 +9,7 @@ Prerequisites::
 
 Run from the monorepo root::
 
-    uv run python road_sign/scripts/retinanet/training/train_patch.py
+    uv run python road_sign/scripts/retinanet/patch_based/train_patch.py
 """
 
 from __future__ import annotations
