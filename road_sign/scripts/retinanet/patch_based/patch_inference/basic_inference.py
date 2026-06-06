@@ -97,7 +97,7 @@ def parse_args() -> argparse.Namespace:
         help="Directory of full-size test images (default: road_sign/data/test/images).",
     )
     parser.add_argument("--output-csv", type=Path, default=None)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--conf-thresh", type=float, default=0.4)
     parser.add_argument("--nms-thresh", type=float, default=0.3)

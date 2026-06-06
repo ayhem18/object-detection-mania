@@ -54,7 +54,7 @@ def analyze_dataset(data_dir):
         print(f"Average bboxes per image: {total_bboxes / num_images:.2f}")
 
 if __name__ == "__main__":
-    data_path = os.path.join(road_sign_root, 'data')
+    data_path = os.path.join(road_sign_root, 'org_data')
     if not os.path.exists(data_path):
         print(f"Data path {data_path} does not exist. Please run prepare_data.py first.")
     else:

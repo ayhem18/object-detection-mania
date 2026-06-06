@@ -108,5 +108,5 @@ def analyze_object_sizes(data_dir):
             print(f"Plot saved to {plot_path}")
 
 if __name__ == "__main__":
-    data_path = os.path.join(road_sign_root, 'data')
+    data_path = os.path.join(road_sign_root, 'org_data')
     analyze_object_sizes(data_path)
